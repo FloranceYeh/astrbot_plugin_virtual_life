@@ -19,6 +19,13 @@ class CommandGroupContractTests(unittest.TestCase):
         for command in ("生成", "导入", "草稿", "批准", "拒绝", "列表", "查看", "重生成"):
             self.assertIn(f'@long_term_group.command("{command}")', self.source)
 
+    def test_view_commands_use_image_renderer(self):
+        self.assertIn("self.image_renderer.render_daily", self.source)
+        self.assertIn("self.image_renderer.render_stage_list", self.source)
+        self.assertIn('status="draft"', self.source)
+        self.assertIn("self.image_renderer.render_stage(stage, persona.id)", self.source)
+        self.assertIn("图片渲染失败，已切换为文字模式", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

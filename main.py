@@ -17,6 +17,7 @@ from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.provider.entities import ProviderRequest
 
 from .core.generator import DailyPlanGenerator
+from .core.image_renderer import ScheduleImageRenderer
 from .core.long_term import LongTermTimelineStore, validate_stage_bundle
 from .core.message_generator import ProactiveMessageGenerator
 from .core.models import DailyPlan, FollowupTask, ProactiveWindow
@@ -47,6 +48,11 @@ class ProactiveVirtualDailyPlugin(Star):
         self.plan_generator = DailyPlanGenerator(context, config)
         self.message_generator = ProactiveMessageGenerator(context, config)
         self.long_term = LongTermTimelineStore(self.data_dir)
+        self.image_renderer = ScheduleImageRenderer(
+            self.data_dir,
+            self.html_render,
+            self.config.get("image_settings", {}) or {},
+        )
         self.timezone = self._resolve_timezone()
         self.policy = ProactivePolicy(config, self.storage, self.timezone)
         self.runtime = SchedulerRuntime(self.timezone)
@@ -64,6 +70,7 @@ class ProactiveVirtualDailyPlugin(Star):
     async def initialize(self) -> None:
         await self.storage.load()
         await self.long_term.load()
+        await self.image_renderer.cleanup()
         schedule_settings = self.config.get("schedule_settings", {}) or {}
         generate_time = str(schedule_settings.get("generate_time", "07:00"))
         self.runtime.start(generate_time, self._daily_refresh)
@@ -384,6 +391,7 @@ class ProactiveVirtualDailyPlugin(Star):
                 requirements="自动延续当前人物的大时间表，保持经历连续但允许进入新的学期、假期、项目或生活阶段。",
             )
             await self.long_term.add_auto_renewal(persona_id, stages)
+            self.image_renderer.invalidate_persona(persona_id)
             self.renewal_attempts.pop(persona_id, None)
             await self._notify_admin(
                 target_umo,
@@ -504,7 +512,7 @@ class ProactiveVirtualDailyPlugin(Star):
             previous_stage=previous_stage,
             requirements=requirements,
         )
-        return await self.long_term.set_draft(
+        draft = await self.long_term.set_draft(
             persona.id,
             stages,
             source=source,
@@ -513,6 +521,18 @@ class ProactiveVirtualDailyPlugin(Star):
             requirements=requirements,
             mode=mode,
         )
+        self.image_renderer.invalidate_persona(persona.id)
+        return draft
+
+    async def _image_view_results(self, event: AstrMessageEvent, title: str, fallback: str, jobs) -> list:
+        if not self.image_renderer.enabled:
+            return [event.plain_result(fallback)]
+        try:
+            paths = [await job() for job in jobs]
+        except Exception:
+            logger.exception("[主动虚拟日程] 图片渲染失败，回退文字输出")
+            return [event.plain_result("图片渲染失败，已切换为文字模式。\n" + fallback)]
+        return [event.plain_result(title), *(event.image_result(path) for path in paths)]
 
     @staticmethod
     def _parse_long_term_json(content: str, persona_id: str) -> list[dict]:
@@ -601,8 +621,20 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @virtual_daily_group.command("查看")
     async def show_schedule(self, event: AstrMessageEvent):
-        _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
-        yield event.plain_result("今日暂无可用日程。" if plan.status != "ok" else format_plan(plan, self._now()))
+        persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        if plan.status != "ok":
+            yield event.plain_result("今日暂无可用日程。")
+            return
+        now = self._now()
+        fallback = format_plan(plan, now)
+        results = await self._image_view_results(
+            event,
+            f"{persona.id} · {plan.date} 虚拟日程",
+            fallback,
+            [lambda: self.image_renderer.render_daily(plan, now)],
+        )
+        for result in results:
+            yield result
 
     @virtual_daily_group.command("重写")
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -626,7 +658,7 @@ class ProactiveVirtualDailyPlugin(Star):
         latest = self.long_term.latest_stage(persona.id)
         start = date.fromisoformat(latest["end_date"]) + timedelta(days=1) if latest else self._now().date()
         try:
-            draft = await self._create_long_term_draft(
+            await self._create_long_term_draft(
                 persona=persona,
                 admin_umo=event.unified_msg_origin,
                 requirements=requirements or "",
@@ -638,7 +670,7 @@ class ProactiveVirtualDailyPlugin(Star):
         except Exception as exc:
             yield event.plain_result(f"生成草稿失败：{exc}")
             return
-        yield event.plain_result("已生成大时间表草稿，使用 /大时间表 草稿 查看，确认后执行 /大时间表 批准。\n" + json.dumps(draft["stages"], ensure_ascii=False, indent=2))
+        yield event.plain_result("已生成大时间表草稿，使用 /大时间表 草稿 查看，确认后执行 /大时间表 批准。")
 
     @long_term_group.command("导入")
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -655,6 +687,7 @@ class ProactiveVirtualDailyPlugin(Star):
                 requirements="结构化数据导入",
                 mode="replace_all",
             )
+            self.image_renderer.invalidate_persona(persona.id)
         except Exception as exc:
             yield event.plain_result(f"导入草稿失败：{exc}")
             return
@@ -665,7 +698,27 @@ class ProactiveVirtualDailyPlugin(Star):
     async def long_term_draft(self, event: AstrMessageEvent):
         persona = await self.personas.resolve(event.unified_msg_origin)
         draft = self.long_term.get_draft(persona.id)
-        yield event.plain_result("当前人格没有待批准草稿。" if not draft else json.dumps(draft, ensure_ascii=False, indent=2))
+        if not draft:
+            yield event.plain_result("当前人格没有待批准草稿。")
+            return
+        fallback = json.dumps(draft, ensure_ascii=False, indent=2)
+        jobs = [
+            lambda stage=stage: self.image_renderer.render_stage(
+                stage,
+                persona.id,
+                status="draft",
+                draft_metadata=draft,
+            )
+            for stage in draft["stages"]
+        ]
+        results = await self._image_view_results(
+            event,
+            f"{persona.id} · 大时间表草稿 · 待批准 · 共 {len(jobs)} 个阶段",
+            fallback,
+            jobs,
+        )
+        for result in results:
+            yield result
 
     @long_term_group.command("批准")
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -673,6 +726,7 @@ class ProactiveVirtualDailyPlugin(Star):
         persona = await self.personas.resolve(event.unified_msg_origin)
         try:
             approved = await self.long_term.approve_draft(persona.id, event.unified_msg_origin)
+            self.image_renderer.invalidate_persona(persona.id)
             await self._refresh_persona_daily_plan(persona)
         except Exception as exc:
             yield event.plain_result(f"批准失败：{exc}")
@@ -688,6 +742,7 @@ class ProactiveVirtualDailyPlugin(Star):
             yield event.plain_result("当前人格没有待拒绝草稿。")
             return
         await self.long_term.reject_draft(persona.id)
+        self.image_renderer.invalidate_persona(persona.id)
         if not feedback:
             yield event.plain_result("草稿已拒绝并删除。")
             return
@@ -695,7 +750,7 @@ class ProactiveVirtualDailyPlugin(Star):
         previous = self.long_term.latest_stage(persona.id) if draft.get("mode") == "append" else None
         requirements = "；".join(part for part in (draft.get("requirements", ""), f"修改意见：{feedback}") if part)
         try:
-            replacement = await self._create_long_term_draft(
+            await self._create_long_term_draft(
                 persona=persona,
                 admin_umo=event.unified_msg_origin,
                 requirements=requirements,
@@ -707,7 +762,7 @@ class ProactiveVirtualDailyPlugin(Star):
         except Exception as exc:
             yield event.plain_result(f"草稿已拒绝，但重新生成失败：{exc}")
             return
-        yield event.plain_result("已按修改意见重新生成草稿：\n" + json.dumps(replacement["stages"], ensure_ascii=False, indent=2))
+        yield event.plain_result("已按修改意见重新生成草稿，使用 /大时间表 草稿 查看。")
 
     @long_term_group.command("列表")
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -717,14 +772,33 @@ class ProactiveVirtualDailyPlugin(Star):
         if not stages:
             yield event.plain_result("当前人格没有已批准的大时间表。")
             return
-        yield event.plain_result("\n".join(f"{stage['id']} | {stage['name']} | {stage['kind']} | {stage['start_date']} 至 {stage['end_date']} | 优先级 {stage['priority']}" for stage in stages))
+        fallback = "\n".join(f"{stage['id']} | {stage['name']} | {stage['kind']} | {stage['start_date']} 至 {stage['end_date']} | 优先级 {stage['priority']}" for stage in stages)
+        results = await self._image_view_results(
+            event,
+            f"{persona.id} · 已批准阶段，共 {len(stages)} 个",
+            fallback,
+            [lambda: self.image_renderer.render_stage_list(stages, persona.id)],
+        )
+        for result in results:
+            yield result
 
     @long_term_group.command("查看")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def long_term_view(self, event: AstrMessageEvent, stage_id: str):
         persona = await self.personas.resolve(event.unified_msg_origin)
         stage = self.long_term.find(persona.id, stage_id)
-        yield event.plain_result("未找到该阶段。" if not stage else json.dumps(stage, ensure_ascii=False, indent=2))
+        if not stage:
+            yield event.plain_result("未找到该阶段。")
+            return
+        fallback = json.dumps(stage, ensure_ascii=False, indent=2)
+        results = await self._image_view_results(
+            event,
+            f"{persona.id} · {stage['name']}",
+            fallback,
+            [lambda: self.image_renderer.render_stage(stage, persona.id)],
+        )
+        for result in results:
+            yield result
 
     @long_term_group.command("重生成")
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -732,7 +806,7 @@ class ProactiveVirtualDailyPlugin(Star):
         persona = await self.personas.resolve(event.unified_msg_origin)
         previous = self.long_term.latest_stage(persona.id)
         try:
-            draft = await self._create_long_term_draft(
+            await self._create_long_term_draft(
                 persona=persona,
                 admin_umo=event.unified_msg_origin,
                 requirements=requirements or "重新规划完整大时间表",
@@ -744,7 +818,7 @@ class ProactiveVirtualDailyPlugin(Star):
         except Exception as exc:
             yield event.plain_result(f"重生成草稿失败：{exc}")
             return
-        yield event.plain_result("已生成替换全部阶段的草稿，批准后才会生效。\n" + json.dumps(draft["stages"], ensure_ascii=False, indent=2))
+        yield event.plain_result("已生成替换全部阶段的草稿，使用 /大时间表 草稿 查看，批准后才会生效。")
 
     @filter.command("主动消息状态")
     async def proactive_status(self, event: AstrMessageEvent):

@@ -39,6 +39,16 @@
       "renewal_max_attempts": {"description": "单次自动续期最大尝试次数", "type": "int", "default": 6}
     }
   },
+  "image_settings": {
+    "description": "🖼️ 日程图片渲染",
+    "type": "object",
+    "items": {
+      "image_render_enabled": {"description": "查看日程和大时间表时使用图片渲染", "type": "bool", "default": true},
+      "image_theme": {"description": "图片主题", "type": "string", "options": ["dark", "light"], "default": "dark"},
+      "image_width": {"description": "图片宽度，范围 720-2000", "type": "int", "default": 1200},
+      "image_font": {"description": "自定义字体名称，留空使用系统中文字体栈", "type": "string", "default": ""}
+    }
+  },
   "friend_settings": {
     "description": "👤 私聊主动消息",
     "type": "object",
