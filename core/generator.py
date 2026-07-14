@@ -36,7 +36,13 @@ class DailyPlanGenerator:
         except Exception:
             return "普通日期"
 
-    async def generate(self, target: date, persona: PersonaContext, extra: str = "") -> DailyPlan:
+    async def generate(
+        self,
+        target: date,
+        persona: PersonaContext,
+        extra: str = "",
+        history_plans: list[DailyPlan] | None = None,
+    ) -> DailyPlan:
         key = f"{target.isoformat()}::{persona.id}"
         if key in self.generating:
             raise RuntimeError("plan generation already running")
@@ -56,6 +62,7 @@ class DailyPlanGenerator:
                 mood=mood,
                 outfit_style=outfit_style,
             )
+            prompt += self._format_history(history_plans or [])
             if extra:
                 prompt += f"\n\n管理员补充要求（最高优先级）：{extra}"
 
@@ -94,6 +101,26 @@ class DailyPlanGenerator:
             )
         finally:
             self.generating.discard(key)
+
+    @staticmethod
+    def _format_history(plans: list[DailyPlan]) -> str:
+        if not plans:
+            return "\n\n近期同人格日程：无。"
+        blocks = []
+        for plan in plans:
+            activities = "；".join(
+                f"{item.start}-{item.end} {item.activity}"
+                for item in plan.timeline
+            )
+            blocks.append(
+                f"- {plan.date}｜主题：{plan.theme}｜心情：{plan.mood}｜"
+                f"穿搭：{plan.outfit}｜活动：{activities}"
+            )
+        return (
+            "\n\n近期同人格日程（仅用于保持生活连续性并避免重复）：\n"
+            + "\n".join(blocks)
+            + "\n新日程可以延续尚未完成的兴趣或状态，但不要照抄相同主题、穿搭和活动组合。"
+        )
 
     async def _call_llm(self, prompt: str, session_id: str) -> str:
         provider_id = str(self._settings().get("llm_provider", "") or "").strip()

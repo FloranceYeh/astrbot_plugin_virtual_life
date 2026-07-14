@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 from core.models import DailyPlan, FollowupTask, SessionState
@@ -35,7 +36,35 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.sessions["umo"].daily_budget, 2)
             self.assertEqual(restored.followups["task"].intent, "问结果")
 
+    async def test_recent_plans_are_persona_isolated_and_ordered(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = PluginStorage(Path(directory))
+
+            def make_plan(date_str, persona_id, theme):
+                return DailyPlan.from_dict(
+                    {
+                        "date": date_str,
+                        "persona_id": persona_id,
+                        "theme": theme,
+                        "mood": "平静",
+                        "outfit": "休闲装",
+                        "timeline": [{"id": "all", "start": "00:00", "end": "24:00", "activity": theme, "state": "available", "availability": "normal"}],
+                        "proactive_windows": [],
+                        "budget_bonus": {"private": 0, "group": 0},
+                    }
+                )
+
+            for plan in (
+                make_plan("2026-07-11", "alice", "太早"),
+                make_plan("2026-07-12", "alice", "前天"),
+                make_plan("2026-07-13", "alice", "昨天"),
+                make_plan("2026-07-13", "bob", "其他人格"),
+            ):
+                storage.plans[storage.plan_key(plan.date, plan.persona_id)] = plan
+
+            recent = storage.get_recent_plans("alice", date(2026, 7, 14), 2)
+            self.assertEqual([plan.theme for plan in recent], ["前天", "昨天"])
+
 
 if __name__ == "__main__":
     unittest.main()
-

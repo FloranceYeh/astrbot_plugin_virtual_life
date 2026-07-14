@@ -117,7 +117,15 @@ class ProactiveVirtualDailyPlugin(Star):
         existing = self.storage.get_plan(date_str, persona.id)
         if existing and not force:
             return existing
-        plan = await self.plan_generator.generate(target, persona, extra=extra)
+        settings = self.config.get("schedule_settings", {}) or {}
+        reference_days = max(0, int(settings.get("reference_history_days", 3)))
+        history_plans = self.storage.get_recent_plans(persona.id, target, reference_days)
+        plan = await self.plan_generator.generate(
+            target,
+            persona,
+            extra=extra,
+            history_plans=history_plans,
+        )
         self.storage.plans[self.storage.plan_key(date_str, persona.id)] = plan
         await self.storage.save_plans()
         return plan

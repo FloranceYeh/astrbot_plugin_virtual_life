@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,15 @@ class PluginStorage:
 
     def get_plan(self, date_str: str, persona_id: str) -> DailyPlan | None:
         return self.plans.get(self.plan_key(date_str, persona_id))
+
+    def get_recent_plans(self, persona_id: str, before: date, days: int) -> list[DailyPlan]:
+        result: list[DailyPlan] = []
+        for offset in range(1, max(0, days) + 1):
+            plan = self.get_plan((before - timedelta(days=offset)).isoformat(), persona_id)
+            if plan and plan.status == "ok":
+                result.append(plan)
+        result.reverse()
+        return result
 
     async def save_plans(self) -> None:
         await self.plans_repo.save({"schema_version": 1, "plans": {key: value.to_dict() for key, value in self.plans.items()}})
