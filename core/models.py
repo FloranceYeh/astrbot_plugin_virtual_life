@@ -11,6 +11,38 @@ Audience = Literal["private", "group", "both"]
 STATES = {"sleep", "busy", "focus", "transit", "available", "social"}
 AVAILABILITIES = {"blocked", "low", "normal", "high"}
 AUDIENCES = {"private", "group", "both"}
+OUTFIT_CATEGORIES = {
+    "hairstyle",
+    "headwear",
+    "underwear",
+    "top",
+    "bottom",
+    "dress",
+    "legwear",
+    "outerwear",
+    "shoes",
+    "accessory",
+    "bag",
+    "makeup",
+    "fragrance",
+    "other",
+}
+OUTFIT_CATEGORY_LABELS = {
+    "hairstyle": "发型",
+    "headwear": "帽子与发饰",
+    "underwear": "内衣与打底",
+    "top": "上装",
+    "bottom": "下装",
+    "dress": "连衣裙与连体服",
+    "legwear": "袜子与腿部穿搭",
+    "outerwear": "外套",
+    "shoes": "鞋履",
+    "accessory": "配饰",
+    "bag": "包具",
+    "makeup": "妆容",
+    "fragrance": "香氛",
+    "other": "其他",
+}
 
 
 def parse_hhmm(value: str, *, allow_2400: bool = False) -> time:
@@ -94,12 +126,67 @@ class ProactiveWindow:
 
 
 @dataclass(slots=True, frozen=True)
+class OutfitItem:
+    category: str
+    name: str
+    details: str = ""
+
+    def __post_init__(self) -> None:
+        if self.category not in OUTFIT_CATEGORIES:
+            raise ValueError(f"invalid outfit category: {self.category}")
+        if not self.name:
+            raise ValueError("outfit item name is required")
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> OutfitItem:
+        return cls(
+            category=str(value.get("category", "")).strip(),
+            name=str(value.get("name", "")).strip(),
+            details=str(value.get("details", "")).strip(),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class Outfit:
+    summary: str
+    items: tuple[OutfitItem, ...]
+
+    def __post_init__(self) -> None:
+        if not self.summary:
+            raise ValueError("outfit summary is required")
+
+    def validate_complete(self) -> None:
+        categories = {item.category for item in self.items}
+        for required in ("hairstyle", "underwear", "shoes"):
+            if required not in categories:
+                raise ValueError(f"outfit must contain category: {required}")
+        if not categories.intersection({"top", "dress", "other"}):
+            raise ValueError("outfit must contain top, dress, or other as the main clothing")
+        if "dress" not in categories and "bottom" not in categories:
+            raise ValueError("outfit without dress must contain bottom")
+
+    @classmethod
+    def from_dict(cls, value: object) -> Outfit:
+        if not isinstance(value, dict):
+            raise ValueError("outfit must be a structured object")
+        raw_items = value.get("items")
+        if not isinstance(raw_items, list):
+            raise ValueError("outfit items must be an array")
+        if any(not isinstance(item, dict) for item in raw_items):
+            raise ValueError("every outfit item must be an object")
+        return cls(
+            summary=str(value.get("summary", "")).strip(),
+            items=tuple(OutfitItem.from_dict(item) for item in raw_items),
+        )
+
+
+@dataclass(slots=True, frozen=True)
 class DailyPlan:
     date: str
     persona_id: str
     theme: str
     mood: str
-    outfit: str
+    outfit: Outfit
     timeline: tuple[TimelineItem, ...]
     proactive_windows: tuple[ProactiveWindow, ...] = ()
     private_bonus: int = 0
@@ -111,6 +198,8 @@ class DailyPlan:
         date.fromisoformat(self.date)
         if not self.persona_id:
             raise ValueError("persona_id is required")
+        if self.status == "ok":
+            self.outfit.validate_complete()
         previous_end = 0
         ids: set[str] = set()
         for item in self.timeline:
@@ -142,7 +231,7 @@ class DailyPlan:
             persona_id=str(value["persona_id"]),
             theme=str(value.get("theme", "日常")),
             mood=str(value.get("mood", "平静")),
-            outfit=str(value.get("outfit", "日常穿搭")),
+            outfit=Outfit.from_dict(value.get("outfit")),
             timeline=tuple(TimelineItem.from_dict(item) for item in value.get("timeline", [])),
             proactive_windows=tuple(ProactiveWindow.from_dict(item) for item in value.get("proactive_windows", [])),
             private_bonus=int(bonus.get("private", value.get("private_bonus", 0))),

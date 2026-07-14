@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 from core.models import DailyPlan
 from core.utils import next_available_at, timeline_item_at
 
+from tests.fixtures import outfit_payload
+
 
 class UtilsTests(unittest.TestCase):
     def setUp(self):
@@ -14,7 +16,7 @@ class UtilsTests(unittest.TestCase):
                 "persona_id": "alice",
                 "theme": "日常",
                 "mood": "平静",
-                "outfit": "休闲装",
+                "outfit": outfit_payload(),
                 "timeline": [
                     {"id": "sleep", "start": "00:00", "end": "08:00", "activity": "睡觉", "state": "sleep", "availability": "blocked"},
                     {"id": "busy", "start": "08:00", "end": "12:00", "activity": "工作", "state": "focus", "availability": "low"},

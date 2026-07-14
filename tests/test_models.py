@@ -2,6 +2,8 @@ import unittest
 
 from core.models import DailyPlan
 
+from tests.fixtures import outfit_payload
+
 
 def valid_payload():
     return {
@@ -9,7 +11,7 @@ def valid_payload():
         "persona_id": "alice",
         "theme": "探索日",
         "mood": "轻快",
-        "outfit": "白衬衫和长裙",
+        "outfit": outfit_payload("清爽的夏日学院风"),
         "timeline": [
             {"id": "sleep", "start": "00:00", "end": "07:00", "activity": "睡觉", "state": "sleep", "availability": "blocked"},
             {"id": "day", "start": "07:00", "end": "23:00", "activity": "生活与工作", "state": "available", "availability": "normal"},
@@ -33,6 +35,19 @@ class ModelTests(unittest.TestCase):
         plan = DailyPlan.from_dict(valid_payload())
         self.assertEqual(plan.private_bonus, 2)
         self.assertEqual(plan.timeline[-1].end, "24:00")
+        self.assertEqual(plan.outfit.items[1].category, "underwear")
+
+    def test_string_outfit_is_rejected(self):
+        payload = valid_payload()
+        payload["outfit"] = "白衬衫和长裙"
+        with self.assertRaisesRegex(ValueError, "structured object"):
+            DailyPlan.from_dict(payload)
+
+    def test_incomplete_outfit_is_rejected(self):
+        payload = valid_payload()
+        payload["outfit"]["items"] = [item for item in payload["outfit"]["items"] if item["category"] != "underwear"]
+        with self.assertRaisesRegex(ValueError, "underwear"):
+            DailyPlan.from_dict(payload)
 
     def test_timeline_gap_is_rejected(self):
         payload = valid_payload()

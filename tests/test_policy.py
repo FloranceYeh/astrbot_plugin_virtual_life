@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 from core.models import DailyPlan
 from core.proactive import ProactivePolicy
 
+from tests.fixtures import outfit_payload
+
 
 def plan(private_bonus=2, group_bonus=1):
     return DailyPlan.from_dict(
@@ -14,7 +16,7 @@ def plan(private_bonus=2, group_bonus=1):
             "persona_id": "alice",
             "theme": "日常",
             "mood": "平静",
-            "outfit": "休闲装",
+            "outfit": outfit_payload(),
             "timeline": [
                 {"id": "all", "start": "00:00", "end": "24:00", "activity": "休息", "state": "available", "availability": "normal"}
             ],
@@ -65,4 +67,3 @@ class PolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

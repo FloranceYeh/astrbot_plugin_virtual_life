@@ -33,6 +33,15 @@
     .light .summary-card { background: #eef2ff; }
     .label { color: #94a3b8; font-size: 14px; margin-bottom: 7px; }
     .value { font-size: 19px; font-weight: 700; line-height: 1.45; }
+    .outfit-summary { font-size: 20px; font-weight: 800; line-height: 1.55; margin-bottom: 15px; }
+    .outfit-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .outfit-item { display: grid; grid-template-columns: 44px 1fr; gap: 13px; padding: 15px; border-radius: 15px; background: rgba(30,41,59,.72); border: 1px solid rgba(148,163,184,.12); }
+    .light .outfit-item { background: #f8fafc; border-color: #e2e8f0; }
+    .outfit-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; background: rgba(56,189,248,.14); color: #7dd3fc; font-size: 22px; }
+    .light .outfit-icon { color: #0369a1; background: #e0f2fe; }
+    .outfit-label { color: #94a3b8; font-size: 13px; }
+    .outfit-name { margin-top: 3px; font-size: 17px; font-weight: 800; }
+    .outfit-details { margin-top: 5px; color: #94a3b8; font-size: 14px; line-height: 1.45; }
     .section { margin-top: 28px; }
     .section:first-child { margin-top: 0; }
     .section-title { display: flex; align-items: center; gap: 10px; margin: 0 0 15px; font-size: 22px; }
@@ -88,11 +97,19 @@
       </header>
       <div class="content">
         {% if view == "daily" %}
-          <div class="summary-grid">
+          <div class="summary-grid" style="grid-template-columns: repeat(2, 1fr);">
             <div class="summary-card"><div class="label">今日主题</div><div class="value">{{ theme_text }}</div></div>
             <div class="summary-card"><div class="label">心情状态</div><div class="value">{{ mood }}</div></div>
-            <div class="summary-card"><div class="label">今日穿搭</div><div class="value">{{ outfit }}</div></div>
           </div>
+          <section class="section">
+            <h2 class="section-title">今日穿搭</h2>
+            <div class="outfit-summary">{{ outfit_summary }}</div>
+            <div class="outfit-grid">
+              {% for item in outfit_items %}
+                <div class="outfit-item"><div class="outfit-icon">{{ item.icon }}</div><div><div class="outfit-label">{{ item.label }}</div><div class="outfit-name">{{ item.name }}</div>{% if item.details %}<div class="outfit-details">{{ item.details }}</div>{% endif %}</div></div>
+              {% endfor %}
+            </div>
+          </section>
           <section class="section">
             <h2 class="section-title">24 小时时间轴</h2>
             <div class="timeline">

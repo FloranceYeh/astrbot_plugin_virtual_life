@@ -10,7 +10,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from .models import DailyPlan, minute_of_day
+from .models import OUTFIT_CATEGORY_LABELS, DailyPlan, minute_of_day
 
 RenderHtml = Callable[..., Awaitable[str]]
 
@@ -37,6 +37,22 @@ SOURCE_LABELS = {
     "auto_renewal": "自动续期",
 }
 WEEKDAY_LABELS = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}
+OUTFIT_CATEGORY_ICONS = {
+    "hairstyle": "✦",
+    "headwear": "♕",
+    "underwear": "◈",
+    "top": "▱",
+    "bottom": "▽",
+    "dress": "♢",
+    "legwear": "║",
+    "outerwear": "◇",
+    "shoes": "◒",
+    "accessory": "✧",
+    "bag": "▣",
+    "makeup": "✿",
+    "fragrance": "❋",
+    "other": "◆",
+}
 
 
 class ScheduleImageRenderer:
@@ -100,6 +116,16 @@ class ScheduleImageRenderer:
             {"at": window.at, "intent": window.intent, "audience": window.audience}
             for window in plan.proactive_windows
         ]
+        outfit_items = [
+            {
+                "category": item.category,
+                "label": OUTFIT_CATEGORY_LABELS[item.category],
+                "icon": OUTFIT_CATEGORY_ICONS[item.category],
+                "name": item.name,
+                "details": item.details,
+            }
+            for item in plan.outfit.items
+        ]
         data = self._base_data(
             "daily",
             plan.persona_id,
@@ -108,7 +134,8 @@ class ScheduleImageRenderer:
                 "subtitle": plan.persona_id,
                 "theme_text": plan.theme,
                 "mood": plan.mood,
-                "outfit": plan.outfit,
+                "outfit_summary": plan.outfit.summary,
+                "outfit_items": outfit_items,
                 "items": items,
                 "windows": windows,
                 "generated_at": now.strftime("%Y-%m-%d %H:%M"),

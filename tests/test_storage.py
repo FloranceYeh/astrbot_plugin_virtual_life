@@ -6,6 +6,8 @@ from pathlib import Path
 from core.models import DailyPlan, FollowupTask, SessionState
 from core.storage import PluginStorage
 
+from tests.fixtures import outfit_payload
+
 
 class StorageTests(unittest.IsolatedAsyncioTestCase):
     async def test_round_trip(self):
@@ -17,7 +19,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
                     "persona_id": "alice",
                     "theme": "日常",
                     "mood": "平静",
-                    "outfit": "休闲装",
+                    "outfit": outfit_payload(),
                     "timeline": [{"id": "all", "start": "00:00", "end": "24:00", "activity": "休息", "state": "available", "availability": "normal"}],
                     "proactive_windows": [],
                     "budget_bonus": {"private": 0, "group": 0},
@@ -47,7 +49,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
                         "persona_id": persona_id,
                         "theme": theme,
                         "mood": "平静",
-                        "outfit": "休闲装",
+                        "outfit": outfit_payload(),
                         "timeline": [{"id": "all", "start": "00:00", "end": "24:00", "activity": theme, "state": "available", "availability": "normal"}],
                         "proactive_windows": [],
                         "budget_bonus": {"private": 0, "group": 0},
@@ -64,6 +66,27 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
 
             recent = storage.get_recent_plans("alice", date(2026, 7, 14), 2)
             self.assertEqual([plan.theme for plan in recent], ["前天", "昨天"])
+
+    async def test_legacy_string_outfit_is_discarded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = PluginStorage(Path(directory))
+            await storage.plans_repo.save(
+                {
+                    "schema_version": 1,
+                    "plans": {
+                        "2026-07-14::alice": {
+                            "date": "2026-07-14",
+                            "persona_id": "alice",
+                            "theme": "旧日程",
+                            "mood": "平静",
+                            "outfit": "旧版字符串穿搭",
+                            "timeline": [],
+                        }
+                    },
+                }
+            )
+            await storage.load()
+            self.assertEqual(storage.plans, {})
 
 
 if __name__ == "__main__":

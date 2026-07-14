@@ -6,6 +6,8 @@ from pathlib import Path
 from core.image_renderer import ScheduleImageRenderer
 from core.models import DailyPlan
 
+from tests.fixtures import outfit_payload
+
 
 class FakeHtmlRenderer:
     def __init__(self, directory: Path):
@@ -26,7 +28,7 @@ def daily_plan():
             "persona_id": "Caranlaf",
             "theme": "学习日",
             "mood": "专注",
-            "outfit": "夏季校服",
+            "outfit": outfit_payload("夏季学院风"),
             "timeline": [
                 {"id": "sleep", "start": "00:00", "end": "08:00", "activity": "睡觉", "state": "sleep", "availability": "blocked"},
                 {"id": "study", "start": "08:00", "end": "24:00", "activity": "学习", "location": "图书馆", "state": "focus", "availability": "low"},
@@ -65,6 +67,7 @@ class ImageRendererTests(unittest.IsolatedAsyncioTestCase):
             items = backend.calls[0][1]["items"]
             self.assertFalse(items[0]["current"])
             self.assertTrue(items[1]["current"])
+            self.assertEqual(backend.calls[0][1]["outfit_items"][1]["label"], "内衣与打底")
             self.assertEqual(backend.calls[0][3]["type"], "png")
 
     async def test_stage_render_is_cached_by_content(self):

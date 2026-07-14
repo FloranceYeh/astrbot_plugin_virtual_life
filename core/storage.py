@@ -37,7 +37,7 @@ class JsonRepository:
 
 class PluginStorage:
     def __init__(self, data_dir: Path):
-        self.plans_repo = JsonRepository(data_dir / "plans.json", {"schema_version": 1, "plans": {}})
+        self.plans_repo = JsonRepository(data_dir / "plans.json", {"schema_version": 2, "plans": {}})
         self.sessions_repo = JsonRepository(data_dir / "sessions.json", {"schema_version": 1, "sessions": {}})
         self.followups_repo = JsonRepository(data_dir / "followups.json", {"schema_version": 1, "tasks": {}})
         self.plans: dict[str, DailyPlan] = {}
@@ -48,7 +48,12 @@ class PluginStorage:
         plans = await self.plans_repo.load()
         sessions = await self.sessions_repo.load()
         followups = await self.followups_repo.load()
-        self.plans = {key: DailyPlan.from_dict(value) for key, value in plans.get("plans", {}).items()}
+        self.plans = {}
+        for key, value in plans.get("plans", {}).items():
+            try:
+                self.plans[key] = DailyPlan.from_dict(value)
+            except (KeyError, TypeError, ValueError):
+                continue
         self.sessions = {key: SessionState.from_dict(value) for key, value in sessions.get("sessions", {}).items()}
         self.followups = {key: FollowupTask.from_dict(value) for key, value in followups.get("tasks", {}).items()}
 
@@ -69,7 +74,7 @@ class PluginStorage:
         return result
 
     async def save_plans(self) -> None:
-        await self.plans_repo.save({"schema_version": 1, "plans": {key: value.to_dict() for key, value in self.plans.items()}})
+        await self.plans_repo.save({"schema_version": 2, "plans": {key: value.to_dict() for key, value in self.plans.items()}})
 
     async def save_sessions(self) -> None:
         await self.sessions_repo.save({"schema_version": 1, "sessions": {key: value.to_dict() for key, value in self.sessions.items()}})

@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import date
 
@@ -5,6 +6,8 @@ from core.generator import DailyPlanGenerator
 from core.long_term import validate_stage
 from core.models import DailyPlan
 from core.persona import PersonaContext
+
+from tests.fixtures import outfit_payload
 
 
 class Response:
@@ -41,15 +44,18 @@ class Context:
 
 
 def valid_json():
-    return """{
-      "date":"ignored",
-      "theme":"日常",
-      "mood":"平静",
-      "outfit":"休闲装",
-      "timeline":[{"id":"all","start":"00:00","end":"24:00","activity":"正常生活","location":"家","state":"available","availability":"normal"}],
-      "proactive_windows":[],
-      "budget_bonus":{"private":1,"group":0}
-    }"""
+    return json.dumps(
+        {
+            "date": "ignored",
+            "theme": "日常",
+            "mood": "平静",
+            "outfit": outfit_payload(),
+            "timeline": [{"id": "all", "start": "00:00", "end": "24:00", "activity": "正常生活", "location": "家", "state": "available", "availability": "normal"}],
+            "proactive_windows": [],
+            "budget_bonus": {"private": 1, "group": 0},
+        },
+        ensure_ascii=False,
+    )
 
 
 class GeneratorTests(unittest.IsolatedAsyncioTestCase):
@@ -88,7 +94,7 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
                 "persona_id": "alice",
                 "theme": "宅家日",
                 "mood": "慵懒",
-                "outfit": "居家裙",
+                "outfit": outfit_payload("舒适的居家造型"),
                 "timeline": [{"id": "all", "start": "00:00", "end": "24:00", "activity": "在家看书", "state": "available", "availability": "normal"}],
                 "proactive_windows": [],
                 "budget_bonus": {"private": 0, "group": 0},
@@ -116,7 +122,9 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         }
         generator = DailyPlanGenerator(Context(provider), config)
         await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
-        self.assertEqual(provider.system_prompts[0], "严格覆盖 00:00 到 24:00，并在输出前自检。")
+        self.assertIn("严格覆盖 00:00 到 24:00，并在输出前自检。", provider.system_prompts[0])
+        self.assertIn("outfit 必须是 JSON 对象", provider.system_prompts[0])
+        self.assertIn("underwear", provider.system_prompts[0])
 
     async def test_schedule_provider_can_be_selected_independently(self):
         default_provider = Provider([])

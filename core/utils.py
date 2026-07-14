@@ -6,7 +6,7 @@ import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from .models import DailyPlan, TimelineItem, minute_of_day
+from .models import OUTFIT_CATEGORY_LABELS, DailyPlan, TimelineItem, minute_of_day
 
 
 def extract_json_object(text: str) -> dict:
@@ -90,7 +90,15 @@ def next_available_at(plan: DailyPlan, moment: datetime) -> datetime | None:
 
 def format_plan(plan: DailyPlan, moment: datetime | None = None) -> str:
     current = timeline_item_at(plan, moment) if moment else None
-    lines = [f"📅 {plan.date} · {plan.theme}", f"💭 心情：{plan.mood}", f"👗 穿搭：{plan.outfit}"]
+    outfit_items = "；".join(
+        f"{OUTFIT_CATEGORY_LABELS[item.category]}：{item.name}"
+        for item in plan.outfit.items
+    )
+    lines = [
+        f"📅 {plan.date} · {plan.theme}",
+        f"💭 心情：{plan.mood}",
+        f"👗 穿搭：{plan.outfit.summary}" + (f"（{outfit_items}）" if outfit_items else ""),
+    ]
     if current:
         lines.append(f"📍 当前：{current.activity}" + (f"（{current.location}）" if current.location else ""))
     lines.append("📝 日程：")

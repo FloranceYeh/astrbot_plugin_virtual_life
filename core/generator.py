@@ -9,7 +9,7 @@ import holidays
 from astrbot.api import logger
 
 from .long_term import validate_stage_bundle
-from .models import DailyPlan
+from .models import DailyPlan, Outfit
 from .persona import PersonaContext
 from .utils import extract_json_object
 
@@ -94,14 +94,15 @@ class DailyPlanGenerator:
                     prompt += (
                         "\n\n上一次输出无效："
                         + last_error
-                        + "。请重新输出完整 JSON，确保时间线从 00:00 连续覆盖到 24:00、无重叠且引用 ID 有效。"
+                        + "。请重新输出完整 JSON，确保结构化穿搭满足全部分类组合规则，"
+                        "并确保时间线从 00:00 连续覆盖到 24:00、无重叠且引用 ID 有效。"
                     )
             return DailyPlan(
                 date=target.isoformat(),
                 persona_id=persona.id,
                 theme="生成失败",
                 mood="未知",
-                outfit="未知",
+                outfit=Outfit(summary="未知", items=()),
                 timeline=(),
                 status="failed",
                 revision=hashlib.sha1(last_error.encode("utf-8")).hexdigest()[:12],
@@ -121,7 +122,7 @@ class DailyPlanGenerator:
             )
             blocks.append(
                 f"- {plan.date}｜主题：{plan.theme}｜心情：{plan.mood}｜"
-                f"穿搭：{plan.outfit}｜活动：{activities}"
+                f"穿搭：{plan.outfit.summary}｜活动：{activities}"
             )
         return (
             "\n\n近期同人格日程（仅用于保持生活连续性并避免重复）：\n"
@@ -136,6 +137,14 @@ class DailyPlanGenerator:
         if not provider:
             raise RuntimeError("no LLM provider available")
         system_prompt = str(self._settings().get("generation_system_prompt", "") or "").strip()
+        outfit_contract = (
+            "outfit 必须是 JSON 对象，包含非空 summary 和 items 数组。items 每项必须包含 category、name、details；"
+            "category 只能是 hairstyle、headwear、underwear、top、bottom、dress、legwear、outerwear、shoes、"
+            "accessory、bag、makeup、fragrance、other。name 必须非空，details 必须是字符串。"
+            "items 必须至少包含 hairstyle、underwear、shoes，并至少包含 top、dress、other 之一；"
+            "如果没有 dress，则必须包含 bottom。没有的可选分类不要输出空对象。禁止把 outfit 输出为字符串。"
+        )
+        system_prompt = f"{system_prompt}\n\n{outfit_contract}" if system_prompt else outfit_contract
         response = await provider.text_chat(
             prompt=prompt,
             session_id=session_id,
