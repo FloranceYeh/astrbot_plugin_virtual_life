@@ -16,6 +16,7 @@ from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.provider.entities import ProviderRequest
 
 from .core.generator import DailyPlanGenerator
+from .core.long_term import LongTermTimelineStore
 from .core.message_generator import ProactiveMessageGenerator
 from .core.models import DailyPlan, FollowupTask, ProactiveWindow
 from .core.persona import PersonaContext, PersonaResolver
@@ -44,11 +45,13 @@ class ProactiveVirtualDailyPlugin(Star):
         self.personas = PersonaResolver(context)
         self.plan_generator = DailyPlanGenerator(context, config)
         self.message_generator = ProactiveMessageGenerator(context, config)
+        self.long_term = LongTermTimelineStore(self.data_dir)
         self.timezone = self._resolve_timezone()
         self.policy = ProactivePolicy(config, self.storage, self.timezone)
         self.runtime = SchedulerRuntime(self.timezone)
         self.refresh_lock = asyncio.Lock()
         self.delivery_locks: dict[str, asyncio.Lock] = {}
+        self.renewal_attempts: dict[str, int] = {}
 
     def _resolve_timezone(self) -> ZoneInfo:
         try:
@@ -59,6 +62,7 @@ class ProactiveVirtualDailyPlugin(Star):
 
     async def initialize(self) -> None:
         await self.storage.load()
+        await self.long_term.load()
         schedule_settings = self.config.get("schedule_settings", {}) or {}
         generate_time = str(schedule_settings.get("generate_time", "07:00"))
         self.runtime.start(generate_time, self._daily_refresh)
@@ -85,6 +89,7 @@ class ProactiveVirtualDailyPlugin(Star):
     async def _refresh_all(self, *, force: bool) -> None:
         async with self.refresh_lock:
             now = self._now()
+            await self._check_long_term_renewals(now.date())
             grouped: dict[str, tuple[PersonaContext, list[str]]] = {}
             for umo in self.policy.enabled_sessions():
                 persona = await self.personas.resolve(umo)
@@ -120,11 +125,20 @@ class ProactiveVirtualDailyPlugin(Star):
         settings = self.config.get("schedule_settings", {}) or {}
         reference_days = max(0, int(settings.get("reference_history_days", 3)))
         history_plans = self.storage.get_recent_plans(persona.id, target, reference_days)
+        long_term_settings = self.config.get("long_term_settings", {}) or {}
+        long_term_context = ""
+        if long_term_settings.get("enable", True):
+            long_term_context = self.long_term.format_day_context(
+                persona.id,
+                target,
+                fallback_to_latest=True,
+            )
         plan = await self.plan_generator.generate(
             target,
             persona,
             extra=extra,
             history_plans=history_plans,
+            long_term_context=long_term_context,
         )
         self.storage.plans[self.storage.plan_key(date_str, persona.id)] = plan
         await self.storage.save_plans()
@@ -336,6 +350,63 @@ class ProactiveVirtualDailyPlugin(Star):
             self._schedule_followup_job(task, max(scheduled, now + timedelta(seconds=2)))
         if changed:
             await self.storage.save_followups()
+
+    async def _check_long_term_renewals(self, target: date) -> None:
+        settings = self.config.get("long_term_settings", {}) or {}
+        if not settings.get("enable", True):
+            return
+        persona_ids = {str(stage.get("persona_id", "")) for stage in self.long_term.stages if stage.get("persona_id")}
+        for persona_id in persona_ids:
+            latest = self.long_term.latest_stage(persona_id)
+            if not latest:
+                continue
+            end = date.fromisoformat(latest["end_date"])
+            if target < end or self.long_term.has_stage_starting_after(persona_id, end):
+                continue
+            await self._run_long_term_renewal(persona_id)
+
+    async def _run_long_term_renewal(self, persona_id: str) -> None:
+        latest = self.long_term.latest_stage(persona_id)
+        target_umo = self.long_term.notification_target(persona_id)
+        if not latest or not target_umo:
+            return
+        attempts = self.renewal_attempts.get(persona_id, 0) + 1
+        self.renewal_attempts[persona_id] = attempts
+        settings = self.config.get("long_term_settings", {}) or {}
+        try:
+            persona = await self.personas.resolve_id(persona_id, target_umo)
+            start = date.fromisoformat(latest["end_date"]) + timedelta(days=1)
+            stages = await self.plan_generator.generate_long_term_timeline(
+                persona,
+                start_date=start,
+                previous_stage=latest,
+                requirements="自动延续当前人物的大时间表，保持经历连续但允许进入新的学期、假期、项目或生活阶段。",
+            )
+            await self.long_term.add_auto_renewal(persona_id, stages)
+            self.renewal_attempts.pop(persona_id, None)
+            await self._notify_admin(
+                target_umo,
+                f"人格 {persona_id} 的大时间表已自动续期："
+                + "、".join(f"{stage['name']}（{stage['start_date']} 至 {stage['end_date']}）" for stage in stages),
+            )
+        except Exception as exc:
+            await self._notify_admin(target_umo, f"人格 {persona_id} 的大时间表自动续期失败（第 {attempts} 次）：{exc}")
+            maximum = max(1, int(settings.get("renewal_max_attempts", 6)))
+            if attempts >= maximum:
+                return
+            delay = max(1, int(settings.get("renewal_retry_minutes", 60)))
+            self.runtime.add_date_job(
+                f"pvd:long-term-renewal:{hashlib.sha1(persona_id.encode()).hexdigest()[:12]}",
+                self._now() + timedelta(minutes=delay),
+                self._run_long_term_renewal,
+                persona_id,
+            )
+
+    async def _notify_admin(self, umo: str, text: str) -> None:
+        try:
+            await self.context.send_message(umo, MessageChain().message(text))
+        except Exception as exc:
+            logger.error("[主动虚拟日程] 管理员通知发送失败 %s: %s", umo, exc)
 
     def _schedule_followup_job(self, task: FollowupTask, run_at: datetime) -> None:
         grace = max(1, int((self.config.get("followup_settings", {}) or {}).get("misfire_grace_minutes", 30)))

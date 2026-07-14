@@ -3,7 +3,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from core.long_term import LongTermTimelineStore, validate_stage
+from core.long_term import LongTermTimelineStore, validate_stage, validate_stage_bundle
 
 
 def academic_stage():
@@ -70,6 +70,38 @@ class LongTermTests(unittest.IsolatedAsyncioTestCase):
             restored = LongTermTimelineStore(path)
             await restored.load()
             self.assertEqual(restored.find("student", "semester-fall")["name"], "秋季学期")
+
+    def test_bundle_requires_continuous_stages(self):
+        first = academic_stage()
+        second = {
+            "id": "winter-break",
+            "name": "寒假",
+            "kind": "academic",
+            "start_date": "2027-01-22",
+            "end_date": "2027-02-20",
+        }
+        with self.assertRaises(ValueError):
+            validate_stage_bundle({"stages": [first, second]}, "student")
+
+    async def test_draft_approval_records_notification_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            store = LongTermTimelineStore(path)
+            stages = validate_stage_bundle({"stages": [academic_stage()]}, "student")
+            await store.set_draft(
+                "student",
+                stages,
+                source="natural",
+                admin_umo="admin-session",
+                created_at="2026-07-14T12:00:00+08:00",
+                requirements="生成校历",
+            )
+            approved = await store.approve_draft("student", "admin-session")
+            restored = LongTermTimelineStore(path)
+            await restored.load()
+            self.assertEqual(approved[0]["id"], "semester-fall")
+            self.assertIsNone(restored.get_draft("student"))
+            self.assertEqual(restored.notification_target("student"), "admin-session")
 
 
 if __name__ == "__main__":

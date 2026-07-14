@@ -2,6 +2,7 @@ import unittest
 from datetime import date
 
 from core.generator import DailyPlanGenerator
+from core.long_term import validate_stage
 from core.models import DailyPlan
 from core.persona import PersonaContext
 
@@ -154,6 +155,63 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.requested_provider_ids, [])
         self.assertEqual(default_provider.calls, 1)
         self.assertEqual(selected_provider.calls, 0)
+
+    async def test_long_term_context_is_injected(self):
+        provider = Provider([valid_json()])
+        config = {
+            "schedule_settings": {
+                "generation_retries": 0,
+                "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}",
+            },
+            "creative_pool": {},
+        }
+        generator = DailyPlanGenerator(Context(provider), config)
+        await generator.generate(
+            date(2026, 9, 7),
+            PersonaContext("student", "persona"),
+            long_term_context="<long_term_timeline>开学典礼</long_term_timeline>",
+        )
+        self.assertIn("开学典礼", provider.prompts[0])
+
+    async def test_long_term_generation_uses_required_start(self):
+        response = """{
+          "stages": [{
+            "id": "semester-spring",
+            "name": "春季学期",
+            "kind": "academic",
+            "start_date": "2027-02-20",
+            "end_date": "2027-07-10",
+            "priority": 10,
+            "summary": "正常上课",
+            "weekly_rules": [],
+            "special_dates": [],
+            "special_periods": [],
+            "milestones": [],
+            "constraints": []
+          }]
+        }"""
+        provider = Provider([response])
+        generator = DailyPlanGenerator(
+            Context(provider),
+            {"schedule_settings": {}, "creative_pool": {}},
+        )
+        previous = validate_stage(
+            {
+                "id": "winter",
+                "name": "寒假",
+                "kind": "academic",
+                "start_date": "2027-01-21",
+                "end_date": "2027-02-19",
+            },
+            "student",
+        )
+        stages = await generator.generate_long_term_timeline(
+            PersonaContext("student", "persona"),
+            start_date=date(2027, 2, 20),
+            previous_stage=previous,
+        )
+        self.assertEqual(stages[0]["start_date"], "2027-02-20")
+        self.assertIn("前一阶段：寒假", provider.prompts[0])
 
 
 if __name__ == "__main__":

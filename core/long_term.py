@@ -36,6 +36,26 @@ def validate_stage(value: dict[str, Any], persona_id: str, *, stage_id: str | No
     return stage
 
 
+def validate_stage_bundle(value: dict[str, Any], persona_id: str, *, required_start: date | None = None) -> list[dict[str, Any]]:
+    raw_stages = value.get("stages") if isinstance(value, dict) else None
+    if not isinstance(raw_stages, list) or not raw_stages:
+        raise ValueError("大时间表必须包含非空 stages 列表")
+    stages = sorted(
+        (validate_stage(raw, persona_id) for raw in raw_stages),
+        key=lambda stage: (stage["start_date"], stage["end_date"], stage["id"]),
+    )
+    ids = [stage["id"] for stage in stages]
+    if len(ids) != len(set(ids)):
+        raise ValueError("大时间表阶段 ID 必须唯一")
+    if required_start and date.fromisoformat(stages[0]["start_date"]) != required_start:
+        raise ValueError(f"首个阶段必须从 {required_start.isoformat()} 开始")
+    for previous, current in zip(stages, stages[1:], strict=False):
+        expected = date.fromisoformat(previous["end_date"]) + timedelta(days=1)
+        if date.fromisoformat(current["start_date"]) != expected:
+            raise ValueError("同一批生成的阶段必须首尾连续，不得重叠或留空")
+    return stages
+
+
 def _strings(values: object) -> list[str]:
     return [str(item).strip() for item in values if str(item).strip()] if isinstance(values, list) else []
 
@@ -118,13 +138,96 @@ class LongTermTimelineStore:
     def __init__(self, data_dir: Path):
         self.repo = JsonRepository(data_dir / "long_term_timelines.json", {"schema_version": 1, "stages": []})
         self.stages: list[dict[str, Any]] = []
+        self.drafts: dict[str, dict[str, Any]] = {}
+        self.notification_targets: dict[str, str] = {}
 
     async def load(self) -> None:
         value = await self.repo.load()
         self.stages = [dict(item) for item in value.get("stages", []) if isinstance(item, dict)]
+        self.drafts = {str(key): dict(item) for key, item in value.get("drafts", {}).items() if isinstance(item, dict)}
+        self.notification_targets = {
+            str(key): str(item)
+            for key, item in value.get("notification_targets", {}).items()
+            if str(item).strip()
+        }
 
     async def save(self) -> None:
-        await self.repo.save({"schema_version": 1, "stages": self.stages})
+        await self.repo.save(
+            {
+                "schema_version": 1,
+                "stages": self.stages,
+                "drafts": self.drafts,
+                "notification_targets": self.notification_targets,
+            }
+        )
+
+    async def set_draft(
+        self,
+        persona_id: str,
+        stages: list[dict[str, Any]],
+        *,
+        source: str,
+        admin_umo: str,
+        created_at: str,
+        requirements: str = "",
+    ) -> dict[str, Any]:
+        draft = {
+            "persona_id": persona_id,
+            "stages": stages,
+            "source": source,
+            "admin_umo": admin_umo,
+            "created_at": created_at,
+            "requirements": requirements,
+        }
+        self.drafts[persona_id] = draft
+        await self.save()
+        return dict(draft)
+
+    def get_draft(self, persona_id: str) -> dict[str, Any] | None:
+        draft = self.drafts.get(persona_id)
+        return dict(draft) if draft else None
+
+    async def reject_draft(self, persona_id: str) -> bool:
+        if persona_id not in self.drafts:
+            return False
+        self.drafts.pop(persona_id, None)
+        await self.save()
+        return True
+
+    async def approve_draft(self, persona_id: str, admin_umo: str) -> list[dict[str, Any]]:
+        draft = self.drafts.get(persona_id)
+        if not draft:
+            raise ValueError("当前人格没有待批准草稿")
+        approved = [dict(stage) for stage in draft["stages"]]
+        approved_ids = {stage["id"] for stage in approved}
+        self.stages = [
+            stage
+            for stage in self.stages
+            if not (stage.get("persona_id") == persona_id and stage.get("id") in approved_ids)
+        ]
+        self.stages.extend(approved)
+        self.drafts.pop(persona_id, None)
+        self.notification_targets[persona_id] = admin_umo
+        await self.save()
+        return approved
+
+    async def add_auto_renewal(self, persona_id: str, stages: list[dict[str, Any]]) -> None:
+        existing_ids = {stage["id"] for stage in self.stages if stage.get("persona_id") == persona_id}
+        self.stages.extend(stage for stage in stages if stage["id"] not in existing_ids)
+        await self.save()
+
+    def notification_target(self, persona_id: str) -> str | None:
+        return self.notification_targets.get(persona_id)
+
+    def latest_stage(self, persona_id: str) -> dict[str, Any] | None:
+        stages = self.list_for_persona(persona_id)
+        return dict(max(stages, key=lambda stage: (stage["end_date"], stage["priority"]))) if stages else None
+
+    def has_stage_starting_after(self, persona_id: str, target: date) -> bool:
+        return any(
+            stage.get("persona_id") == persona_id and date.fromisoformat(stage["start_date"]) > target
+            for stage in self.stages
+        )
 
     def list_for_persona(self, persona_id: str) -> list[dict[str, Any]]:
         return sorted(
@@ -199,9 +302,20 @@ class LongTermTimelineStore:
             "milestones": milestones,
         }
 
-    def format_day_context(self, persona_id: str, target: date) -> str:
+    def format_day_context(self, persona_id: str, target: date, *, fallback_to_latest: bool = False) -> str:
         expanded = self.expand_day(persona_id, target)
         if not expanded:
+            latest = self.latest_stage(persona_id) if fallback_to_latest else None
+            if latest:
+                return (
+                    "<long_term_timeline>\n"
+                    f"最近阶段已于 {latest['end_date']} 结束：{latest['name']}（{latest['kind']}）。\n"
+                    f"阶段说明：{latest.get('summary') or '无'}\n"
+                    "后续阶段正在自动生成中；在生成成功前，可延续该阶段的人物背景和一般约束，"
+                    "但不要虚构已经过期的固定课程、会议或截止日期。\n"
+                    "一般约束：" + ("；".join(latest.get("constraints", [])) or "无") + "\n"
+                    "</long_term_timeline>"
+                )
             return "长期时间表：当前日期没有生效阶段。"
         stage = expanded["stage"]
         lines = [

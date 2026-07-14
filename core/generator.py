@@ -8,6 +8,7 @@ import holidays
 
 from astrbot.api import logger
 
+from .long_term import validate_stage_bundle
 from .models import DailyPlan
 from .persona import PersonaContext
 from .utils import extract_json_object
@@ -42,6 +43,7 @@ class DailyPlanGenerator:
         persona: PersonaContext,
         extra: str = "",
         history_plans: list[DailyPlan] | None = None,
+        long_term_context: str = "",
     ) -> DailyPlan:
         key = f"{target.isoformat()}::{persona.id}"
         if key in self.generating:
@@ -63,6 +65,8 @@ class DailyPlanGenerator:
                 outfit_style=outfit_style,
             )
             prompt += self._format_history(history_plans or [])
+            if long_term_context:
+                prompt += "\n\n" + long_term_context
             if extra:
                 prompt += f"\n\n管理员补充要求（最高优先级）：{extra}"
 
@@ -137,6 +141,59 @@ class DailyPlanGenerator:
             session_id=session_id,
             system_prompt=system_prompt or None,
         )
+        for key in ("completion_text", "completion", "text", "content"):
+            value = getattr(response, key, None)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        raise RuntimeError("LLM returned empty completion")
+
+    async def generate_long_term_timeline(
+        self,
+        persona: PersonaContext,
+        *,
+        start_date: date,
+        previous_stage: dict | None = None,
+        requirements: str = "",
+    ) -> list[dict]:
+        previous_text = "无"
+        if previous_stage:
+            previous_text = (
+                f"{previous_stage['name']}（{previous_stage['kind']}，"
+                f"{previous_stage['start_date']} 至 {previous_stage['end_date']}）："
+                f"{previous_stage.get('summary') or '无说明'}"
+            )
+        system_prompt = (
+            "你是严格的大时间表规划器。只输出一个 JSON 对象，不要 Markdown、代码块或解释。"
+            "JSON 顶层必须是 stages 数组，包含 1 至 3 个首尾连续的阶段。"
+            "每个阶段必须包含 id、name、kind、start_date、end_date、priority、summary、"
+            "weekly_rules、special_dates、special_periods、milestones、constraints。"
+            "kind 只能是 academic、project、custom。日期使用 YYYY-MM-DD，时间使用 HH:MM。"
+            "weekly_rules 包含 weekdays、start、end、title、location、participants、required；"
+            "special_dates 额外包含 date；special_periods 包含 name、start_date、end_date、constraints；"
+            "milestones 包含 date、title、lead_days。首阶段必须从指定日期开始，后续阶段必须从前一阶段结束次日开始。"
+        )
+        prompt = (
+            f"起始日期：{start_date.isoformat()}\n"
+            f"人格设定：\n{persona.prompt}\n\n"
+            f"前一阶段：{previous_text}\n"
+            f"管理员要求：{requirements or '无'}\n\n"
+            "请根据人格自行判断适合的阶段类型和合理持续时间。学生角色可生成学期、假期、考试周等校历；"
+            "上班族角色可生成项目周期、冲刺期、发布期等工期；其他角色使用 custom。"
+        )
+        raw = await self._call_llm_with_system(
+            prompt,
+            f"long_term_{persona.id}_{start_date.isoformat()}",
+            system_prompt,
+        )
+        return validate_stage_bundle(extract_json_object(raw), persona.id, required_start=start_date)
+
+    async def _call_llm_with_system(self, prompt: str, session_id: str, system_prompt: str) -> str:
+        provider_id = str(self._settings().get("schedule_llm_provider") or "").strip()
+        provider = self.context.get_provider_by_id(provider_id) if provider_id else None
+        provider = provider or self.context.get_using_provider()
+        if not provider:
+            raise RuntimeError("no LLM provider available")
+        response = await provider.text_chat(prompt=prompt, session_id=session_id, system_prompt=system_prompt)
         for key in ("completion_text", "completion", "text", "content"):
             value = getattr(response, key, None)
             if isinstance(value, str) and value.strip():

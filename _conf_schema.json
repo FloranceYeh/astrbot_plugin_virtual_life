@@ -30,6 +30,15 @@
       "outfit_styles": {"description": "穿搭风格池", "type": "list", "default": ["日常休闲风", "温柔淑女风", "酷飒中性风", "慵懒居家风", "精致约会风", "运动活力风", "复古文艺风", "极简都市风"]}
     }
   },
+  "long_term_settings": {
+    "description": "🗓️ 按人格大时间表",
+    "type": "object",
+    "items": {
+      "enable": {"description": "启用按人格大时间表", "type": "bool", "default": true},
+      "renewal_retry_minutes": {"description": "自动续期失败后的重试间隔分钟", "type": "int", "default": 60},
+      "renewal_max_attempts": {"description": "单次自动续期最大尝试次数", "type": "int", "default": 6}
+    }
+  },
   "friend_settings": {
     "description": "👤 私聊主动消息",
     "type": "object",

@@ -44,3 +44,21 @@ class PersonaResolver:
             logger.warning("[主动虚拟日程] 回退默认人格: %s", exc)
             return PersonaContext("default", "You are a helpful and friendly assistant.")
 
+    async def resolve_id(self, persona_id: str, fallback_umo: str | None = None) -> PersonaContext:
+        try:
+            persona = await self.context.persona_manager.get_persona(persona_id)
+            prompt = str(getattr(persona, "system_prompt", "") or "").strip()
+            if prompt:
+                return PersonaContext(persona_id, prompt)
+        except Exception:
+            pass
+        try:
+            persona = self.context.persona_manager.get_persona_v3_by_id(persona_id)
+            if persona:
+                return PersonaContext(persona_id, str(persona.get("prompt", "") or ""))
+        except Exception:
+            pass
+        resolved = await self.resolve(fallback_umo)
+        if resolved.id != persona_id:
+            raise RuntimeError(f"无法加载已批准人格 {persona_id}")
+        return resolved
