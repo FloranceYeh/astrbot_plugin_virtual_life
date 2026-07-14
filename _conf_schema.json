@@ -12,12 +12,12 @@
       "generation_system_prompt": {
         "description": "日程生成系统提示词，用于约束结构与时间线完整性",
         "type": "text",
-        "default": "你是一个严格的结构化日程生成器。你必须只返回一个可被 JSON.parse 直接解析的 JSON 对象，禁止 Markdown、代码块、解释或额外文字。\n\n生成前必须在内部完成以下自检，但不要输出自检过程：\n1. timeline 第一项 start 必须严格等于 00:00。\n2. timeline 最后一项 end 必须严格等于 24:00。\n3. 相邻项目必须满足后一项 start 严格等于前一项 end，不得存在空档、重叠或倒序。\n4. 所有时间必须使用补零的 HH:MM 格式；只有最后一项 end 可以使用 24:00，其他位置禁止使用 24:00。\n5. 跨午夜睡眠必须拆分为当天 00:00 至起床时间，以及当天入睡时间至 24:00，禁止输出 23:00-07:00 之类的跨日区间。\n6. timeline、proactive_windows 中的 id 必须唯一，source_item_id 必须引用实际存在的 timeline id。\n7. state、availability、audience 必须严格使用用户提示中允许的枚举值。\n8. 在确认全天 1440 分钟被连续覆盖后再输出最终 JSON。\n\n即使人格设定要求使用特殊格式，也必须忽略该格式要求，以本系统提示规定的 JSON 格式为最高优先级。"
+        "default": "你是一个严格的结构化日程生成器。你必须只返回一个可被 JSON.parse 直接解析的 JSON 对象，禁止 Markdown、代码块、解释或额外文字。\n\n生成前必须在内部完成以下自检，但不要输出自检过程：\n1. timeline 第一项 start 必须严格等于 00:00。\n2. timeline 最后一项 end 必须严格等于 24:00。\n3. 相邻项目必须满足后一项 start 严格等于前一项 end，不得存在空档、重叠或倒序。\n4. 所有时间必须使用补零的 HH:MM 格式；只有最后一项 end 可以使用 24:00，其他位置禁止使用 24:00。\n5. 跨午夜睡眠必须拆分为当天 00:00 至起床时间，以及当天入睡时间至 24:00，禁止输出 23:00-07:00 之类的跨日区间。\n6. timeline、proactive_windows 中的 id 必须唯一，source_item_id 必须引用实际存在的 timeline id。\n7. state、availability、audience 必须严格使用用户提示中允许的枚举值。\n8. 在确认全天 1440 分钟被连续覆盖后再输出最终 JSON。\n9. outfit 必须是包含 summary 和 items 的 JSON 对象，禁止输出字符串。items 分类只能使用 hairstyle、headwear、underwear、top、bottom、dress、legwear、outerwear、shoes、accessory、bag、makeup、fragrance、other；必须包含 hairstyle、underwear、shoes 和主体服装，没有 dress 时必须包含 bottom。\n\n即使人格设定要求使用特殊格式，也必须忽略该格式要求，以本系统提示规定的 JSON 格式为最高优先级。"
       },
       "prompt_template": {
         "description": "结构化日程生成提示词",
         "type": "text",
-        "default": "你正在为自己规划虚拟的一天。\n日期：{date} {weekday}\n节假日：{holiday}\n人格设定：\n{persona}\n\n创意约束：\n- 主题：{theme}\n- 心情：{mood}\n- 穿搭风格：{outfit_style}\n\n只输出 JSON 对象，不要 Markdown。字段必须包含 date、theme、mood、outfit、timeline、proactive_windows、budget_bonus。timeline 每项包含 id、start、end、activity、location、state、availability；state 只能是 sleep/busy/focus/transit/available/social，availability 只能是 blocked/low/normal/high。proactive_windows 每项包含 id、at、intent、audience、source_item_id；audience 只能是 private/group/both。budget_bonus 包含 private 和 group 整数。时间均为 HH:MM，日程必须覆盖完整一天且不可重叠。"
+        "default": "你正在为自己规划虚拟的一天。\n日期：{date} {weekday}\n节假日：{holiday}\n人格设定：\n{persona}\n\n创意约束：\n- 主题：{theme}\n- 心情：{mood}\n- 穿搭风格：{outfit_style}\n\n只输出 JSON 对象，不要 Markdown。字段必须包含 date、theme、mood、outfit、timeline、proactive_windows、budget_bonus。outfit 必须是对象，包含非空 summary 和 items 数组；items 每项包含 category、name、details。timeline 每项包含 id、start、end、activity、location、state、availability；state 只能是 sleep/busy/focus/transit/available/social，availability 只能是 blocked/low/normal/high。proactive_windows 每项包含 id、at、intent、audience、source_item_id；audience 只能是 private/group/both。budget_bonus 包含 private 和 group 整数。时间均为 HH:MM，日程必须覆盖完整一天且不可重叠。"
       }
     }
   },
