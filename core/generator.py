@@ -70,7 +70,10 @@ class DailyPlanGenerator:
             last_error = ""
             for attempt in range(attempts):
                 try:
-                    raw = await self._call_llm(prompt, f"proactive_daily_{persona.id}_{target.isoformat()}")
+                    raw = await self._call_llm(
+                        prompt,
+                        f"proactive_daily_{persona.id}_{target.isoformat()}",
+                    )
                     payload = extract_json_object(raw)
                     payload["date"] = target.isoformat()
                     payload["persona_id"] = persona.id
@@ -128,7 +131,12 @@ class DailyPlanGenerator:
         provider = provider or self.context.get_using_provider()
         if not provider:
             raise RuntimeError("no LLM provider available")
-        response = await provider.text_chat(prompt, session_id=session_id)
+        system_prompt = str(self._settings().get("generation_system_prompt", "") or "").strip()
+        response = await provider.text_chat(
+            prompt=prompt,
+            session_id=session_id,
+            system_prompt=system_prompt or None,
+        )
         for key in ("completion_text", "completion", "text", "content"):
             value = getattr(response, key, None)
             if isinstance(value, str) and value.strip():

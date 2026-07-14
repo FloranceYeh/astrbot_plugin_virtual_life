@@ -16,10 +16,12 @@ class Provider:
         self.responses = list(responses)
         self.calls = 0
         self.prompts = []
+        self.system_prompts = []
 
-    async def text_chat(self, prompt, session_id):
+    async def text_chat(self, prompt, session_id, system_prompt=None):
         self.calls += 1
         self.prompts.append(prompt)
+        self.system_prompts.append(system_prompt)
         return Response(self.responses.pop(0))
 
 
@@ -97,6 +99,20 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2026-07-13", provider.prompts[0])
         self.assertIn("在家看书", provider.prompts[0])
         self.assertIn("不要照抄", provider.prompts[0])
+
+    async def test_generation_system_prompt_is_passed_separately(self):
+        provider = Provider([valid_json()])
+        config = {
+            "schedule_settings": {
+                "generation_retries": 0,
+                "generation_system_prompt": "严格覆盖 00:00 到 24:00，并在输出前自检。",
+                "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}",
+            },
+            "creative_pool": {},
+        }
+        generator = DailyPlanGenerator(Context(provider), config)
+        await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
+        self.assertEqual(provider.system_prompts[0], "严格覆盖 00:00 到 24:00，并在输出前自检。")
 
 
 if __name__ == "__main__":
