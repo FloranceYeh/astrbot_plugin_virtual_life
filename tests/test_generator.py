@@ -181,7 +181,7 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
             "kind": "academic",
             "start_date": "2027-02-20",
             "end_date": "2027-07-10",
-            "priority": 10,
+            "priority": "high",
             "summary": "正常上课",
             "weekly_rules": [],
             "special_dates": [],
@@ -211,6 +211,9 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
             previous_stage=previous,
         )
         self.assertEqual(stages[0]["start_date"], "2027-02-20")
+        self.assertEqual(stages[0]["priority"], 75)
+        self.assertIn("priority", provider.system_prompts[0])
+        self.assertIn("high, medium, low", provider.system_prompts[0])
         self.assertIn("前一阶段：寒假", provider.prompts[0])
 
 

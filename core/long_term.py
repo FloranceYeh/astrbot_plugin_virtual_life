@@ -8,6 +8,46 @@ from .models import minute_of_day
 from .storage import JsonRepository
 
 STAGE_KINDS = {"academic", "project", "custom"}
+PRIORITY_LABELS = {
+    "critical": 100,
+    "highest": 100,
+    "urgent": 100,
+    "\u7d27\u6025": 100,
+    "\u6700\u9ad8": 100,
+    "high": 75,
+    "\u9ad8": 75,
+    "medium": 50,
+    "normal": 50,
+    "\u4e2d": 50,
+    "\u666e\u901a": 50,
+    "low": 25,
+    "\u4f4e": 25,
+    "lowest": 0,
+    "\u6700\u4f4e": 0,
+}
+
+
+def normalize_priority(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("priority must be an integer from 0 to 100 or a common priority label, not a boolean")
+    if isinstance(value, int):
+        priority = value
+    elif isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in PRIORITY_LABELS:
+            priority = PRIORITY_LABELS[normalized]
+        else:
+            try:
+                priority = int(normalized)
+            except ValueError as exc:
+                raise ValueError(
+                    f"unrecognized priority {value!r}; use an integer from 0 to 100 or a label such as high, medium, or low"
+                ) from exc
+    else:
+        raise ValueError("priority must be an integer from 0 to 100 or a common priority label")
+    if not 0 <= priority <= 100:
+        raise ValueError("priority must be between 0 and 100")
+    return priority
 
 
 def validate_stage(value: dict[str, Any], persona_id: str, *, stage_id: str | None = None) -> dict[str, Any]:
@@ -27,7 +67,7 @@ def validate_stage(value: dict[str, Any], persona_id: str, *, stage_id: str | No
         raise ValueError("start_date 不能晚于 end_date")
     stage["start_date"] = start.isoformat()
     stage["end_date"] = end.isoformat()
-    stage["priority"] = int(stage.get("priority", 0))
+    stage["priority"] = normalize_priority(stage.get("priority", 0))
     stage["constraints"] = _strings(stage.get("constraints", []))
     stage["weekly_rules"] = _validate_weekly_rules(stage.get("weekly_rules", []))
     stage["special_dates"] = _validate_special_dates(stage.get("special_dates", []), start, end)

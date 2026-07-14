@@ -163,6 +163,7 @@ class DailyPlanGenerator:
                 f"{previous_stage.get('summary') or '无说明'}"
             )
         system_prompt = (
+            "priority \u5fc5\u987b\u662f 0 \u81f3 100 \u7684 JSON \u6574\u6570\uff0c\u7981\u6b62\u4f7f\u7528 high, medium, low \u7b49\u6587\u672c\u503c\u3002"
             "你是严格的大时间表规划器。只输出一个 JSON 对象，不要 Markdown、代码块或解释。"
             "JSON 顶层必须是 stages 数组，包含 1 至 3 个首尾连续的阶段。"
             "每个阶段必须包含 id、name、kind、start_date、end_date、priority、summary、"
