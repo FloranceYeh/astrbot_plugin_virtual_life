@@ -4,7 +4,8 @@
     "type": "object",
     "items": {
       "generate_time": {"description": "每日生成时间 HH:MM", "type": "string", "default": "07:00"},
-      "llm_provider": {"description": "日程与主动消息使用的 LLM 供应商，留空使用当前供应商", "type": "string", "default": ""},
+      "schedule_llm_provider": {"description": "日程生成使用的 LLM Provider", "type": "string", "_special": "select_provider", "hint": "留空使用 AstrBot 当前供应商", "default": ""},
+      "proactive_llm_provider": {"description": "主动消息生成使用的 LLM Provider", "type": "string", "_special": "select_provider", "hint": "留空使用 AstrBot 当前供应商", "default": ""},
       "reference_history_days": {"description": "生成日程时参考前几天的同人格日程，0 表示不参考", "type": "int", "default": 3},
       "history_days": {"description": "保留历史日程天数", "type": "int", "default": 14},
       "generation_retries": {"description": "日程生成失败重试次数", "type": "int", "default": 1},

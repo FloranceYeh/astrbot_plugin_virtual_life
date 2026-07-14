@@ -30,6 +30,8 @@
 关键默认值：
 
 - 每日生成时间：`07:00`
+- `schedule_llm_provider`：通过 AstrBot 内置 Provider 选择器指定日程生成模型，留空使用当前供应商
+- `proactive_llm_provider`：通过 AstrBot 内置 Provider 选择器单独指定主动消息模型，留空使用当前供应商
 - 历史日程参考天数：`3`，设置为 `0` 可关闭
 - `generation_system_prompt` 会在独立系统消息中强制要求时间线完整覆盖 `00:00-24:00`、无空档和重叠，并要求模型输出前自检
 - 私聊随机预算：`1-3`，LLM 最多增加 `2`，硬上限 `5`

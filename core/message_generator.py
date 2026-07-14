@@ -36,7 +36,8 @@ class ProactiveMessageGenerator:
             f"<persona>\n{persona.prompt}\n</persona>\n\n"
             f"<recent_conversation>\n{history}\n</recent_conversation>\n\n{task_prompt}"
         )
-        provider_id = str((self.config.get("schedule_settings", {}) or {}).get("llm_provider", "") or "").strip()
+        schedule_settings = self.config.get("schedule_settings", {}) or {}
+        provider_id = str(schedule_settings.get("proactive_llm_provider") or "").strip()
         provider = self.context.get_provider_by_id(provider_id) if provider_id else None
         provider = provider or self.context.get_using_provider()
         if not provider:

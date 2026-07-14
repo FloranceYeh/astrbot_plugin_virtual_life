@@ -126,7 +126,7 @@ class DailyPlanGenerator:
         )
 
     async def _call_llm(self, prompt: str, session_id: str) -> str:
-        provider_id = str(self._settings().get("llm_provider", "") or "").strip()
+        provider_id = str(self._settings().get("schedule_llm_provider") or "").strip()
         provider = self.context.get_provider_by_id(provider_id) if provider_id else None
         provider = provider or self.context.get_using_provider()
         if not provider:

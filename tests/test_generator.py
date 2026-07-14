@@ -26,11 +26,14 @@ class Provider:
 
 
 class Context:
-    def __init__(self, provider):
+    def __init__(self, provider, selected_provider=None):
         self.provider = provider
+        self.selected_provider = selected_provider
+        self.requested_provider_ids = []
 
     def get_provider_by_id(self, provider_id):
-        return None
+        self.requested_provider_ids.append(provider_id)
+        return self.selected_provider
 
     def get_using_provider(self):
         return self.provider
@@ -113,6 +116,44 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         generator = DailyPlanGenerator(Context(provider), config)
         await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
         self.assertEqual(provider.system_prompts[0], "严格覆盖 00:00 到 24:00，并在输出前自检。")
+
+    async def test_schedule_provider_can_be_selected_independently(self):
+        default_provider = Provider([])
+        selected_provider = Provider([valid_json()])
+        context = Context(default_provider, selected_provider=selected_provider)
+        config = {
+            "schedule_settings": {
+                "schedule_llm_provider": "schedule-provider",
+                "generation_retries": 0,
+                "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}",
+            },
+            "creative_pool": {},
+        }
+        generator = DailyPlanGenerator(context, config)
+        plan = await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
+        self.assertEqual(plan.status, "ok")
+        self.assertEqual(context.requested_provider_ids, ["schedule-provider"])
+        self.assertEqual(selected_provider.calls, 1)
+        self.assertEqual(default_provider.calls, 0)
+
+    async def test_legacy_provider_setting_is_not_used(self):
+        default_provider = Provider([valid_json()])
+        selected_provider = Provider([])
+        context = Context(default_provider, selected_provider=selected_provider)
+        config = {
+            "schedule_settings": {
+                "llm_provider": "legacy-provider",
+                "generation_retries": 0,
+                "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}",
+            },
+            "creative_pool": {},
+        }
+        generator = DailyPlanGenerator(context, config)
+        plan = await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
+        self.assertEqual(plan.status, "ok")
+        self.assertEqual(context.requested_provider_ids, [])
+        self.assertEqual(default_provider.calls, 1)
+        self.assertEqual(selected_provider.calls, 0)
 
 
 if __name__ == "__main__":
