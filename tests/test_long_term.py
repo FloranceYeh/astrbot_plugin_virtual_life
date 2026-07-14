@@ -78,6 +78,38 @@ class LongTermTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.active_stage("student", date(2026, 9, 10))["id"], "semester-fall")
             self.assertEqual(store.active_stage("worker", date(2026, 9, 10))["id"], "release")
 
+    def test_resolve_stage_supports_default_name_and_partial_id(self):
+        store = LongTermTimelineStore(Path("unused"))
+        first = validate_stage(academic_stage(), "student")
+        second_value = academic_stage()
+        second_value.update({"weekly_rules": [], "special_dates": [], "special_periods": [], "milestones": []})
+        second_value.update({"id": "winter-break", "name": "寒假", "start_date": "2027-01-21", "end_date": "2027-02-20"})
+        second = validate_stage(second_value, "student")
+        store.stages = [first, second]
+
+        active, _ = store.resolve_stage("student", date(2026, 10, 1))
+        future, _ = store.resolve_stage("student", date(2026, 8, 1))
+        past, _ = store.resolve_stage("student", date(2027, 3, 1))
+        by_name, _ = store.resolve_stage("student", date(2026, 10, 1), "寒假")
+        by_partial, _ = store.resolve_stage("student", date(2026, 10, 1), "winter")
+
+        self.assertEqual(active["id"], "semester-fall")
+        self.assertEqual(future["id"], "semester-fall")
+        self.assertEqual(past["id"], "winter-break")
+        self.assertEqual(by_name["id"], "winter-break")
+        self.assertEqual(by_partial["id"], "winter-break")
+
+    def test_resolve_stage_returns_ambiguous_candidates(self):
+        store = LongTermTimelineStore(Path("unused"))
+        first = validate_stage(academic_stage(), "student")
+        second_value = academic_stage()
+        second_value.update({"weekly_rules": [], "special_dates": [], "special_periods": [], "milestones": []})
+        second_value.update({"id": "semester-spring", "name": "春季学期", "start_date": "2027-01-21", "end_date": "2027-06-30"})
+        store.stages = [first, validate_stage(second_value, "student")]
+        stage, candidates = store.resolve_stage("student", date(2026, 10, 1), "semester")
+        self.assertIsNone(stage)
+        self.assertEqual([item["id"] for item in candidates], ["semester-fall", "semester-spring"])
+
     async def test_persistence(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

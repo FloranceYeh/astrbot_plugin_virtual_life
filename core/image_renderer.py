@@ -241,7 +241,11 @@ class ScheduleImageRenderer:
     async def _render(self, data: dict[str, Any], *, persona_id: str, view: str, cache: bool) -> str:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(
-            json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            (
+                self.template
+                + "\n"
+                + json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            ).encode("utf-8")
         ).hexdigest()[:20]
         prefix = self._persona_key(persona_id)
         filename = f"{prefix}-{view}-{digest}.png" if cache else f"{prefix}-{view}-{uuid.uuid4().hex}.png"

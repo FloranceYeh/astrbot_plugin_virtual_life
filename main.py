@@ -616,11 +616,12 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @filter.command_group("虚拟日程")
     def virtual_daily_group(self):
-        """查看和重写每日虚拟日程。"""
+        """虚拟日程命令组；不提供子命令时由 AstrBot 输出帮助。"""
         pass
 
     @virtual_daily_group.command("查看")
     async def show_schedule(self, event: AstrMessageEvent):
+        """查看今日虚拟日程图片。"""
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
         if plan.status != "ok":
             yield event.plain_result("今日暂无可用日程。")
@@ -639,6 +640,7 @@ class ProactiveVirtualDailyPlugin(Star):
     @virtual_daily_group.command("重写")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def rewrite_schedule(self, event: AstrMessageEvent, extra: str | None = None):
+        """重新生成今日虚拟日程。"""
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin, force=True, extra=extra or "")
         for umo in self.policy.enabled_sessions():
             resolved = await self.personas.resolve(umo)
@@ -648,12 +650,13 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @filter.command_group("大时间表")
     def long_term_group(self):
-        """管理当前人格的校历、工期等长期阶段。"""
+        """大时间表命令组；不提供子命令时由 AstrBot 输出帮助。"""
         pass
 
     @long_term_group.command("生成")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def long_term_generate(self, event: AstrMessageEvent, requirements: str | None = None):
+        """根据自然语言要求生成追加草稿。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         latest = self.long_term.latest_stage(persona.id)
         start = date.fromisoformat(latest["end_date"]) + timedelta(days=1) if latest else self._now().date()
@@ -675,6 +678,7 @@ class ProactiveVirtualDailyPlugin(Star):
     @long_term_group.command("导入")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def long_term_import(self, event: AstrMessageEvent, content: str):
+        """导入结构化 JSON 为替换全部阶段的草稿。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         try:
             stages = self._parse_long_term_json(content, persona.id)
@@ -696,6 +700,7 @@ class ProactiveVirtualDailyPlugin(Star):
     @long_term_group.command("草稿")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def long_term_draft(self, event: AstrMessageEvent):
+        """查看当前人格待批准草稿。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         draft = self.long_term.get_draft(persona.id)
         if not draft:
@@ -723,6 +728,7 @@ class ProactiveVirtualDailyPlugin(Star):
     @long_term_group.command("批准")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def long_term_approve(self, event: AstrMessageEvent):
+        """批准草稿并重新生成今日日程。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         try:
             approved = await self.long_term.approve_draft(persona.id, event.unified_msg_origin)
@@ -736,6 +742,7 @@ class ProactiveVirtualDailyPlugin(Star):
     @long_term_group.command("拒绝")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def long_term_reject(self, event: AstrMessageEvent, feedback: str | None = None):
+        """拒绝草稿；提供修改意见时重新生成。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         draft = self.long_term.get_draft(persona.id)
         if not draft:
@@ -767,6 +774,7 @@ class ProactiveVirtualDailyPlugin(Star):
     @long_term_group.command("列表")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def long_term_list(self, event: AstrMessageEvent):
+        """查看当前人格全部已批准阶段。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         stages = self.long_term.list_for_persona(persona.id)
         if not stages:
@@ -784,11 +792,19 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @long_term_group.command("查看")
     @filter.permission_type(filter.PermissionType.ADMIN)
-    async def long_term_view(self, event: AstrMessageEvent, stage_id: str):
+    async def long_term_view(self, event: AstrMessageEvent, stage_id: str | None = None):
+        """查看阶段；可省略参数或输入阶段 ID、名称及唯一片段。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
-        stage = self.long_term.find(persona.id, stage_id)
+        stage, candidates = self.long_term.resolve_stage(persona.id, self._now().date(), stage_id or "")
         if not stage:
-            yield event.plain_result("未找到该阶段。")
+            if candidates:
+                lines = ["找到多个匹配阶段，请使用完整 ID 或名称："]
+                lines.extend(f"- {item['id']} | {item['name']} | {item['start_date']} 至 {item['end_date']}" for item in candidates)
+                yield event.plain_result("\n".join(lines))
+            elif stage_id:
+                yield event.plain_result("未找到匹配阶段，请先使用 /大时间表 列表 查看可用 ID。")
+            else:
+                yield event.plain_result("当前人格没有已批准的大时间表。")
             return
         fallback = json.dumps(stage, ensure_ascii=False, indent=2)
         results = await self._image_view_results(
@@ -803,6 +819,7 @@ class ProactiveVirtualDailyPlugin(Star):
     @long_term_group.command("重生成")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def long_term_regenerate(self, event: AstrMessageEvent, requirements: str | None = None):
+        """重新生成替换全部阶段的草稿。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         previous = self.long_term.latest_stage(persona.id)
         try:

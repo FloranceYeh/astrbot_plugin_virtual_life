@@ -81,6 +81,8 @@
     .bar-fill { position: absolute; top: 0; bottom: 0; min-width: 8px; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #38bdf8); }
     .stage-summary { margin-top: 12px; color: #cbd5e1; line-height: 1.55; }
     .light .stage-summary { color: #475569; }
+    .stage-command { margin-top: 10px; color: #7dd3fc; font-family: Consolas, monospace; font-size: 14px; }
+    .light .stage-command { color: #0369a1; }
     .draft-meta { padding: 18px; border-radius: 16px; background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.3); }
     .empty { padding: 24px; text-align: center; color: #94a3b8; border: 1px dashed rgba(148,163,184,.3); border-radius: 16px; }
     .footer { color: #64748b; text-align: right; font-size: 13px; padding: 0 6px; }
@@ -140,6 +142,7 @@
                 <div class="stage-head"><div><div class="stage-name">{{ item.name }}</div><div class="stage-dates">{{ item.id }} · {{ item.kind_label }} · {{ item.start_date }} 至 {{ item.end_date }}</div></div><div class="badge">优先级 {{ item.priority }}</div></div>
                 <div class="bar"><div class="bar-fill" style="left: {{ item.left }}%; width: {{ item.width }}%;"></div></div>
                 {% if item.summary %}<div class="stage-summary">{{ item.summary }}</div>{% endif %}
+                <div class="stage-command">/大时间表 查看 {{ item.id }}</div>
               </div>
             {% endfor %}
           </div></section>

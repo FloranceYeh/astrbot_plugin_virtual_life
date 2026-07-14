@@ -26,6 +26,11 @@ class CommandGroupContractTests(unittest.TestCase):
         self.assertIn("self.image_renderer.render_stage(stage, persona.id)", self.source)
         self.assertIn("图片渲染失败，已切换为文字模式", self.source)
 
+    def test_groups_and_stage_view_have_navigation_help(self):
+        self.assertIn("不提供子命令时由 AstrBot 输出帮助", self.source)
+        self.assertIn("stage_id: str | None = None", self.source)
+        self.assertIn("self.long_term.resolve_stage", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

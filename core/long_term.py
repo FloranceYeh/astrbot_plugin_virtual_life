@@ -271,6 +271,40 @@ class LongTermTimelineStore:
             None,
         )
 
+    def resolve_stage(
+        self,
+        persona_id: str,
+        target: date,
+        query: str = "",
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        stages = self.list_for_persona(persona_id)
+        normalized = query.strip().strip("\"'").casefold()
+        if not normalized:
+            active = self.active_stage(persona_id, target)
+            if active:
+                return active, []
+            future = [stage for stage in stages if date.fromisoformat(stage["start_date"]) > target]
+            if future:
+                return min(future, key=lambda stage: (stage["start_date"], stage["end_date"])), []
+            past = [stage for stage in stages if date.fromisoformat(stage["end_date"]) < target]
+            return (max(past, key=lambda stage: (stage["end_date"], stage["start_date"])), []) if past else (None, [])
+
+        exact_id = [stage for stage in stages if str(stage.get("id", "")).casefold() == normalized]
+        if exact_id:
+            return exact_id[0], []
+        exact_name = [stage for stage in stages if str(stage.get("name", "")).casefold() == normalized]
+        if len(exact_name) == 1:
+            return exact_name[0], []
+        if len(exact_name) > 1:
+            return None, exact_name
+        matches = [
+            stage
+            for stage in stages
+            if normalized in str(stage.get("id", "")).casefold()
+            or normalized in str(stage.get("name", "")).casefold()
+        ]
+        return (matches[0], []) if len(matches) == 1 else (None, matches)
+
     def active_stage(self, persona_id: str, target: date) -> dict[str, Any] | None:
         matched = [
             stage
