@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: {{ width }}px;
+      padding: 42px;
+      font-family: {{ font_stack }};
+      color: #e9eef7;
+      background: #0b1020;
+    }
+    body.light { color: #172033; background: #eef2f8; }
+    .page { display: flex; flex-direction: column; gap: 24px; }
+    .panel {
+      border: 1px solid rgba(148, 163, 184, .18);
+      border-radius: 22px;
+      background: rgba(17, 24, 39, .92);
+      box-shadow: 0 18px 60px rgba(0, 0, 0, .26);
+      overflow: hidden;
+    }
+    .light .panel { background: #fff; border-color: #dbe3ef; box-shadow: 0 16px 45px rgba(30, 41, 59, .12); }
+    .header { padding: 30px 34px; background: linear-gradient(135deg, #4f46e5, #0ea5e9); }
+    .header-row { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+    h1 { margin: 0; color: #fff; font-size: 36px; line-height: 1.2; }
+    .subtitle { margin-top: 9px; color: rgba(255,255,255,.8); font-size: 18px; }
+    .badge { padding: 8px 14px; border-radius: 999px; font-weight: 700; background: rgba(255,255,255,.18); color: #fff; white-space: nowrap; }
+    .content { padding: 30px 34px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .summary-card { padding: 17px 18px; border-radius: 16px; background: rgba(99, 102, 241, .12); }
+    .light .summary-card { background: #eef2ff; }
+    .label { color: #94a3b8; font-size: 14px; margin-bottom: 7px; }
+    .value { font-size: 19px; font-weight: 700; line-height: 1.45; }
+    .section { margin-top: 28px; }
+    .section:first-child { margin-top: 0; }
+    .section-title { display: flex; align-items: center; gap: 10px; margin: 0 0 15px; font-size: 22px; }
+    .section-title::before { content: ""; width: 5px; height: 22px; border-radius: 5px; background: #38bdf8; }
+    .timeline { display: flex; flex-direction: column; gap: 12px; }
+    .timeline-row { display: grid; grid-template-columns: 128px 1fr; gap: 18px; align-items: stretch; }
+    .time { padding-top: 18px; color: #93c5fd; font-size: 17px; font-weight: 700; text-align: right; }
+    .event { position: relative; padding: 17px 20px 17px 24px; border-radius: 16px; background: rgba(30, 41, 59, .86); border: 1px solid rgba(148,163,184,.12); }
+    .light .event { background: #f8fafc; border-color: #e2e8f0; }
+    .event::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; border-radius: 16px 0 0 16px; background: #64748b; }
+    .event.current { background: rgba(14,165,233,.15); border-color: rgba(56,189,248,.5); box-shadow: 0 0 0 2px rgba(56,189,248,.12); }
+    .event.current::before { background: #38bdf8; }
+    .event.sleep::before { background: #818cf8; }
+    .event.busy::before { background: #fb7185; }
+    .event.focus::before { background: #fbbf24; }
+    .event.transit::before { background: #a78bfa; }
+    .event.available::before { background: #34d399; }
+    .event.social::before { background: #22d3ee; }
+    .event-title { font-size: 21px; font-weight: 800; }
+    .event-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px 14px; color: #94a3b8; font-size: 15px; }
+    .current-mark { color: #38bdf8; font-weight: 800; }
+    .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+    .chip { padding: 7px 11px; border-radius: 999px; background: rgba(56,189,248,.12); color: #7dd3fc; font-size: 14px; }
+    .light .chip { color: #0369a1; background: #e0f2fe; }
+    .cards { display: grid; gap: 13px; }
+    .detail-card { padding: 17px 19px; border-radius: 16px; background: rgba(30,41,59,.72); border: 1px solid rgba(148,163,184,.12); }
+    .light .detail-card { background: #f8fafc; border-color: #e2e8f0; }
+    .detail-head { display: flex; justify-content: space-between; gap: 18px; font-size: 18px; font-weight: 800; }
+    .detail-meta { margin-top: 8px; color: #94a3b8; line-height: 1.55; }
+    .overview { display: flex; flex-direction: column; gap: 18px; }
+    .stage-row { padding: 18px; border-radius: 17px; background: rgba(30,41,59,.72); }
+    .light .stage-row { background: #f8fafc; }
+    .stage-head { display: flex; justify-content: space-between; gap: 18px; }
+    .stage-name { font-size: 20px; font-weight: 800; }
+    .stage-dates { color: #94a3b8; margin-top: 6px; }
+    .bar { position: relative; height: 14px; margin-top: 16px; border-radius: 999px; background: rgba(148,163,184,.16); overflow: hidden; }
+    .bar-fill { position: absolute; top: 0; bottom: 0; min-width: 8px; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #38bdf8); }
+    .stage-summary { margin-top: 12px; color: #cbd5e1; line-height: 1.55; }
+    .light .stage-summary { color: #475569; }
+    .draft-meta { padding: 18px; border-radius: 16px; background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.3); }
+    .empty { padding: 24px; text-align: center; color: #94a3b8; border: 1px dashed rgba(148,163,184,.3); border-radius: 16px; }
+    .footer { color: #64748b; text-align: right; font-size: 13px; padding: 0 6px; }
+  </style>
+</head>
+<body class="{{ theme }}">
+  <main class="page">
+    <section class="panel">
+      <header class="header">
+        <div class="header-row">
+          <div><h1>{{ title }}</h1><div class="subtitle">{{ subtitle }}</div></div>
+          {% if status_label %}<div class="badge">{{ status_label }}</div>{% endif %}
+        </div>
+      </header>
+      <div class="content">
+        {% if view == "daily" %}
+          <div class="summary-grid">
+            <div class="summary-card"><div class="label">今日主题</div><div class="value">{{ theme_text }}</div></div>
+            <div class="summary-card"><div class="label">心情状态</div><div class="value">{{ mood }}</div></div>
+            <div class="summary-card"><div class="label">今日穿搭</div><div class="value">{{ outfit }}</div></div>
+          </div>
+          <section class="section">
+            <h2 class="section-title">24 小时时间轴</h2>
+            <div class="timeline">
+              {% for item in items %}
+                <div class="timeline-row">
+                  <div class="time">{{ item.start }}<br>↓<br>{{ item.end }}</div>
+                  <div class="event {{ item.state }}{% if item.current %} current{% endif %}">
+                    <div class="event-title">{{ item.activity }} {% if item.current %}<span class="current-mark">· 当前</span>{% endif %}</div>
+                    <div class="event-meta">
+                      {% if item.location %}<span>地点：{{ item.location }}</span>{% endif %}
+                      <span>状态：{{ item.state_label }}</span><span>联系：{{ item.availability_label }}</span>
+                    </div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </section>
+          {% if windows %}
+            <section class="section"><h2 class="section-title">主动消息窗口</h2><div class="cards">
+              {% for item in windows %}<div class="detail-card"><div class="detail-head"><span>{{ item.intent }}</span><span>{{ item.at }}</span></div><div class="detail-meta">受众：{{ item.audience }}</div></div>{% endfor %}
+            </div></section>
+          {% endif %}
+        {% elif view == "stage_list" %}
+          <div class="summary-card"><div class="label">整体范围</div><div class="value">{{ range }}</div></div>
+          <section class="section"><h2 class="section-title">阶段总览</h2><div class="overview">
+            {% for item in stages %}
+              <div class="stage-row">
+                <div class="stage-head"><div><div class="stage-name">{{ item.name }}</div><div class="stage-dates">{{ item.id }} · {{ item.kind_label }} · {{ item.start_date }} 至 {{ item.end_date }}</div></div><div class="badge">优先级 {{ item.priority }}</div></div>
+                <div class="bar"><div class="bar-fill" style="left: {{ item.left }}%; width: {{ item.width }}%;"></div></div>
+                {% if item.summary %}<div class="stage-summary">{{ item.summary }}</div>{% endif %}
+              </div>
+            {% endfor %}
+          </div></section>
+        {% elif view == "stage" %}
+          {% if draft_metadata %}<div class="draft-meta"><div class="detail-head"><span>草稿来源：{{ draft_metadata.source }}</span><span>{{ draft_metadata.created_at }}</span></div>{% if draft_metadata.requirements %}<div class="detail-meta">管理员要求：{{ draft_metadata.requirements }}</div>{% endif %}</div>{% endif %}
+          <div class="summary-grid section">
+            <div class="summary-card"><div class="label">阶段类型</div><div class="value">{{ stage.kind_label }}</div></div>
+            <div class="summary-card"><div class="label">日期范围</div><div class="value">{{ stage.start_date }}<br>至 {{ stage.end_date }}</div></div>
+            <div class="summary-card"><div class="label">优先级</div><div class="value">{{ stage.priority }}</div></div>
+          </div>
+          {% if stage.summary %}<section class="section"><h2 class="section-title">阶段摘要</h2><div class="detail-card">{{ stage.summary }}</div></section>{% endif %}
+          {% if stage.weekly_rules %}<section class="section"><h2 class="section-title">周安排</h2><div class="cards">{% for item in stage.weekly_rules %}<div class="detail-card"><div class="detail-head"><span>{{ item.title }}</span><span>{{ item.weekday_text }} · {{ item.start }}–{{ item.end }}</span></div><div class="detail-meta">{% if item.location %}地点：{{ item.location }}{% endif %}{% if item.participants_text %} · 参与：{{ item.participants_text }}{% endif %}</div></div>{% endfor %}</div></section>{% endif %}
+          {% if stage.special_dates %}<section class="section"><h2 class="section-title">特殊日期</h2><div class="cards">{% for item in stage.special_dates %}<div class="detail-card"><div class="detail-head"><span>{{ item.title }}</span><span>{{ item.date }} · {{ item.start }}–{{ item.end }}</span></div><div class="detail-meta">{% if item.location %}地点：{{ item.location }}{% endif %}{% if item.participants_text %} · 参与：{{ item.participants_text }}{% endif %}</div></div>{% endfor %}</div></section>{% endif %}
+          {% if stage.special_periods %}<section class="section"><h2 class="section-title">特殊时期</h2><div class="cards">{% for item in stage.special_periods %}<div class="detail-card"><div class="detail-head"><span>{{ item.name }}</span><span>{{ item.start_date }} 至 {{ item.end_date }}</span></div>{% if item.constraints %}<div class="chips detail-meta">{% for value in item.constraints %}<span class="chip">{{ value }}</span>{% endfor %}</div>{% endif %}</div>{% endfor %}</div></section>{% endif %}
+          {% if stage.milestones %}<section class="section"><h2 class="section-title">里程碑</h2><div class="cards">{% for item in stage.milestones %}<div class="detail-card"><div class="detail-head"><span>{{ item.title }}</span><span>{{ item.date }}</span></div><div class="detail-meta">提前 {{ item.lead_days }} 天提醒</div></div>{% endfor %}</div></section>{% endif %}
+          {% if stage.constraints %}<section class="section"><h2 class="section-title">阶段约束</h2><div class="chips">{% for value in stage.constraints %}<span class="chip">{{ value }}</span>{% endfor %}</div></section>{% endif %}
+          {% if not stage.summary and not stage.weekly_rules and not stage.special_dates and not stage.special_periods and not stage.milestones and not stage.constraints %}<div class="empty section">暂无细化安排</div>{% endif %}
+        {% endif %}
+      </div>
+    </section>
+    <div class="footer">{{ persona_id }}{% if generated_at %} · 生成于 {{ generated_at }}{% endif %}</div>
+  </main>
+</body>
+</html>
