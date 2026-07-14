@@ -1,0 +1,15 @@
+name: astrbot_plugin_proactive_virtual_daily
+display_name: 主动虚拟日程
+desc: 按人格生成虚拟日程，并结合当前状态、会话沉默与用户委托主动发送消息
+version: v1.0.0
+author: Florance
+repo: https://github.com/FloranceYeh/astrbot_plugin_proactive_virtual_daily
+astrbot_version: ">=4.26.0"
+support_platforms:
+  - aiocqhttp
+  - telegram
+  - wecom
+  - lark
+  - dingtalk
+  - kook
+

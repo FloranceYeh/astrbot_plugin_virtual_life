@@ -1,0 +1,2 @@
+APScheduler>=3.10,<4.0
+holidays>=0.40

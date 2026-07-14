@@ -1,0 +1,512 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import random
+import re
+import uuid
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.star import Context, Star, StarTools
+from astrbot.core.agent.message import TextPart
+from astrbot.core.config.astrbot_config import AstrBotConfig
+from astrbot.core.provider.entities import ProviderRequest
+
+from .core.generator import DailyPlanGenerator
+from .core.message_generator import ProactiveMessageGenerator
+from .core.models import DailyPlan, FollowupTask, ProactiveWindow
+from .core.persona import PersonaContext, PersonaResolver
+from .core.proactive import ProactivePolicy, session_kind
+from .core.runtime import SchedulerRuntime
+from .core.storage import PluginStorage
+from .core.utils import (
+    deterministic_int,
+    deterministic_probability,
+    format_plan,
+    next_available_at,
+    now_in,
+    parse_datetime,
+    prune_date_keys,
+    timeline_item_at,
+)
+
+
+class ProactiveVirtualDailyPlugin(Star):
+    def __init__(self, context: Context, config: AstrBotConfig):
+        super().__init__(context)
+        self.context = context
+        self.config = config
+        self.data_dir = StarTools.get_data_dir("astrbot_plugin_proactive_virtual_daily")
+        self.storage = PluginStorage(self.data_dir)
+        self.personas = PersonaResolver(context)
+        self.plan_generator = DailyPlanGenerator(context, config)
+        self.message_generator = ProactiveMessageGenerator(context, config)
+        self.timezone = self._resolve_timezone()
+        self.policy = ProactivePolicy(config, self.storage, self.timezone)
+        self.runtime = SchedulerRuntime(self.timezone)
+        self.refresh_lock = asyncio.Lock()
+        self.delivery_locks: dict[str, asyncio.Lock] = {}
+
+    def _resolve_timezone(self) -> ZoneInfo:
+        try:
+            name = str(self.context.get_config().get("timezone") or "Asia/Shanghai")
+            return ZoneInfo(name)
+        except Exception:
+            return ZoneInfo("Asia/Shanghai")
+
+    async def initialize(self) -> None:
+        await self.storage.load()
+        schedule_settings = self.config.get("schedule_settings", {}) or {}
+        generate_time = str(schedule_settings.get("generate_time", "07:00"))
+        self.runtime.start(generate_time, self._daily_refresh)
+        await self._refresh_all(force=False)
+        await self._restore_followups()
+        logger.info("[主动虚拟日程] 插件已启动，时区=%s", self.timezone.key)
+
+    async def terminate(self) -> None:
+        self.runtime.stop()
+        await self.storage.save_plans()
+        await self.storage.save_sessions()
+        await self.storage.save_followups()
+
+    @staticmethod
+    def _umo_hash(umo: str) -> str:
+        return hashlib.sha1(umo.encode("utf-8")).hexdigest()[:12]
+
+    def _now(self) -> datetime:
+        return now_in(self.timezone)
+
+    async def _daily_refresh(self) -> None:
+        await self._refresh_all(force=True)
+
+    async def _refresh_all(self, *, force: bool) -> None:
+        async with self.refresh_lock:
+            now = self._now()
+            grouped: dict[str, tuple[PersonaContext, list[str]]] = {}
+            for umo in self.policy.enabled_sessions():
+                persona = await self.personas.resolve(umo)
+                grouped.setdefault(persona.id, (persona, []))[1].append(umo)
+
+            for persona, sessions in grouped.values():
+                plan = await self._ensure_plan(persona, now.date(), force=force)
+                for umo in sessions:
+                    await self._schedule_session(umo, persona, plan)
+
+            keep_days = int((self.config.get("schedule_settings", {}) or {}).get("history_days", 14))
+            self.storage.plans = prune_date_keys(self.storage.plans, keep_days, now.date())
+            await self.storage.save_plans()
+            await self.storage.save_sessions()
+
+    async def _ensure_plan_for_umo(self, umo: str, *, force: bool = False, extra: str = "") -> tuple[PersonaContext, DailyPlan]:
+        persona = await self.personas.resolve(umo)
+        plan = await self._ensure_plan(persona, self._now().date(), force=force, extra=extra)
+        return persona, plan
+
+    async def _ensure_plan(
+        self,
+        persona: PersonaContext,
+        target: date,
+        *,
+        force: bool = False,
+        extra: str = "",
+    ) -> DailyPlan:
+        date_str = target.isoformat()
+        existing = self.storage.get_plan(date_str, persona.id)
+        if existing and not force:
+            return existing
+        plan = await self.plan_generator.generate(target, persona, extra=extra)
+        self.storage.plans[self.storage.plan_key(date_str, persona.id)] = plan
+        await self.storage.save_plans()
+        return plan
+
+    async def _schedule_session(self, umo: str, persona: PersonaContext, plan: DailyPlan) -> None:
+        prefix = f"pvd:{self._umo_hash(umo)}:plan:"
+        self.runtime.remove_prefix(prefix)
+        now = self._now()
+        state = self.policy.ensure_state(umo, persona.id, plan, now)
+        if plan.status == "ok":
+            for window in plan.proactive_windows:
+                if not self._window_matches(umo, window):
+                    continue
+                run_at = self._at_time(plan.date, window.at)
+                if run_at <= now:
+                    continue
+                self.runtime.add_date_job(
+                    prefix + "window:" + window.id,
+                    run_at,
+                    self._run_window,
+                    umo,
+                    persona.id,
+                    plan.revision,
+                    window.id,
+                )
+            await self._schedule_sleep_exception(umo, persona, plan, state)
+        self._schedule_idle(umo)
+
+    @staticmethod
+    def _window_matches(umo: str, window: ProactiveWindow) -> bool:
+        kind = "group" if session_kind(umo) == "group" else "private"
+        return window.audience in {"both", kind}
+
+    def _at_time(self, date_str: str, hhmm: str) -> datetime:
+        hour, minute = map(int, hhmm.split(":"))
+        return datetime.combine(date.fromisoformat(date_str), time(hour, minute), self.timezone)
+
+    async def _schedule_sleep_exception(self, umo, persona, plan, state) -> None:
+        if state.sleep_drawn:
+            return
+        state.sleep_drawn = True
+        probability = float((self.config.get("delivery_settings", {}) or {}).get("sleep_exception_probability", 0.08))
+        state.sleep_selected = deterministic_probability(f"sleep::{plan.date}::{umo}") < max(0.0, min(1.0, probability))
+        if not state.sleep_selected:
+            return
+        sleep_items = [item for item in plan.timeline if item.state == "sleep"]
+        if not sleep_items:
+            return
+        item = max(sleep_items, key=lambda value: self._duration_minutes(value.start, value.end))
+        start = self._at_time(plan.date, item.start)
+        end = self._end_time(plan.date, item.end)
+        if end <= self._now() or (end - start).total_seconds() < 120:
+            return
+        earliest = max(start, self._now() + timedelta(seconds=10))
+        span = max(1, int((end - earliest).total_seconds() // 60) - 1)
+        offset = deterministic_int(f"sleep-time::{plan.date}::{umo}", 0, span)
+        run_at = earliest + timedelta(minutes=offset)
+        self.runtime.add_date_job(
+            f"pvd:{self._umo_hash(umo)}:plan:sleep",
+            run_at,
+            self._run_sleep,
+            umo,
+            persona.id,
+            plan.revision,
+        )
+
+    @staticmethod
+    def _duration_minutes(start: str, end: str) -> int:
+        def value(raw: str) -> int:
+            if raw == "24:00":
+                return 1440
+            hour, minute = map(int, raw.split(":"))
+            return hour * 60 + minute
+
+        return value(end) - value(start)
+
+    def _end_time(self, date_str: str, hhmm: str) -> datetime:
+        if hhmm == "24:00":
+            return datetime.combine(date.fromisoformat(date_str) + timedelta(days=1), time.min, self.timezone)
+        return self._at_time(date_str, hhmm)
+
+    def _schedule_idle(self, umo: str, *, run_at: datetime | None = None) -> None:
+        job_id = f"pvd:{self._umo_hash(umo)}:idle"
+        self.runtime.remove(job_id)
+        if not self.policy.is_enabled(umo):
+            return
+        if run_at is None:
+            settings = self.policy.settings_for(umo)
+            minimum = max(1, int(settings.get("idle_min_minutes", 90)))
+            maximum = max(minimum, int(settings.get("idle_max_minutes", minimum)))
+            run_at = self._now() + timedelta(minutes=random.randint(minimum, maximum))
+        self.runtime.add_date_job(job_id, run_at, self._run_idle, umo)
+
+    async def _run_window(self, umo: str, persona_id: str, revision: str, window_id: str) -> None:
+        persona, plan = await self._ensure_plan_for_umo(umo)
+        if persona.id != persona_id or plan.revision != revision:
+            await self._schedule_session(umo, persona, plan)
+            return
+        window = next((value for value in plan.proactive_windows if value.id == window_id), None)
+        if not window:
+            return
+        await self._attempt_unsolicited(umo, persona, plan, window.intent, "window")
+
+    async def _run_sleep(self, umo: str, persona_id: str, revision: str) -> None:
+        persona, plan = await self._ensure_plan_for_umo(umo)
+        if persona.id != persona_id or plan.revision != revision:
+            return
+        await self._attempt_unsolicited(umo, persona, plan, "睡梦中醒来、起夜或失眠时忽然想起对方", "sleep")
+
+    async def _run_idle(self, umo: str) -> None:
+        persona, plan = await self._ensure_plan_for_umo(umo)
+        sent, reason = await self._attempt_unsolicited(umo, persona, plan, "会话已经沉默了一段时间，想自然地重新联系", "idle")
+        if sent:
+            self._schedule_idle(umo)
+            return
+        if reason == "current schedule is not interruptible" or reason == "sleeping":
+            next_time = next_available_at(plan, self._now())
+            if next_time:
+                self._schedule_idle(umo, run_at=next_time + timedelta(minutes=random.randint(3, 15)))
+        elif reason in {"cooldown active", "conversation is not idle enough"}:
+            self._schedule_idle(umo, run_at=self._now() + timedelta(minutes=30))
+
+    async def _attempt_unsolicited(
+        self,
+        umo: str,
+        persona: PersonaContext,
+        plan: DailyPlan,
+        intent: str,
+        trigger: str,
+    ) -> tuple[bool, str]:
+        lock = self.delivery_locks.setdefault(umo, asyncio.Lock())
+        async with lock:
+            now = self._now()
+            state = self.policy.ensure_state(umo, persona.id, plan, now)
+            current_item = timeline_item_at(plan, now)
+            decision = self.policy.evaluate(umo=umo, state=state, current_item=current_item, now=now, trigger=trigger)
+            if not decision.allowed:
+                logger.info("[主动虚拟日程] 跳过 %s: %s", umo, decision.reason)
+                return False, decision.reason
+            await self._deliver(umo, persona, plan, intent, state.unanswered_count)
+            self.policy.record_delivery(state, now)
+            await self.storage.save_sessions()
+            return True, "sent"
+
+    async def _deliver(
+        self,
+        umo: str,
+        persona: PersonaContext,
+        plan: DailyPlan,
+        intent: str,
+        unanswered_count: int,
+    ) -> None:
+        now = self._now()
+        current_item = timeline_item_at(plan, now)
+        current_state = current_item.activity if current_item else "今日状态暂未明确"
+        text = await self.message_generator.generate(
+            umo=umo,
+            persona=persona,
+            current_time=now,
+            current_state=current_state,
+            intent=intent,
+            unanswered_count=unanswered_count,
+        )
+        await self._send_text(umo, text)
+
+    async def _send_text(self, umo: str, text: str) -> None:
+        settings = self.config.get("delivery_settings", {}) or {}
+        segments = self._split_text(text, int(settings.get("segment_max_chars", 80))) if settings.get("segment_reply", True) else [text]
+        interval = max(0.0, float(settings.get("segment_interval_seconds", 1.2)))
+        for index, segment in enumerate(segments):
+            sent = await self.context.send_message(umo, MessageChain().message(segment))
+            if not sent:
+                raise RuntimeError(f"platform unavailable for {umo}")
+            if index + 1 < len(segments) and interval:
+                await asyncio.sleep(interval)
+
+    @staticmethod
+    def _split_text(text: str, maximum: int) -> list[str]:
+        maximum = max(20, maximum)
+        pieces = [piece.strip() for piece in re.split(r"(?<=[。！？!?\n])", text) if piece.strip()]
+        result: list[str] = []
+        buffer = ""
+        for piece in pieces or [text.strip()]:
+            if buffer and len(buffer) + len(piece) > maximum:
+                result.append(buffer)
+                buffer = piece
+            else:
+                buffer += piece
+            while len(buffer) > maximum:
+                result.append(buffer[:maximum])
+                buffer = buffer[maximum:]
+        if buffer:
+            result.append(buffer)
+        return result or [text]
+
+    async def _restore_followups(self) -> None:
+        now = self._now()
+        grace = max(1, int((self.config.get("followup_settings", {}) or {}).get("misfire_grace_minutes", 30)))
+        changed = False
+        for task in self.storage.followups.values():
+            if task.status != "pending":
+                continue
+            scheduled = parse_datetime(task.scheduled_at, self.timezone)
+            if scheduled < now - timedelta(minutes=grace):
+                task.status = "missed"
+                changed = True
+                continue
+            self._schedule_followup_job(task, max(scheduled, now + timedelta(seconds=2)))
+        if changed:
+            await self.storage.save_followups()
+
+    def _schedule_followup_job(self, task: FollowupTask, run_at: datetime) -> None:
+        grace = max(1, int((self.config.get("followup_settings", {}) or {}).get("misfire_grace_minutes", 30)))
+        self.runtime.add_date_job(
+            f"pvd:followup:{task.id}",
+            run_at,
+            self._run_followup,
+            task.id,
+            misfire_grace_time=grace * 60,
+        )
+
+    async def _create_followup(self, umo: str, scheduled_at: str, intent: str) -> FollowupTask:
+        settings = self.config.get("followup_settings", {}) or {}
+        if not settings.get("enable", True):
+            raise ValueError("回访功能未启用")
+        run_at = parse_datetime(scheduled_at, self.timezone)
+        if run_at <= self._now():
+            raise ValueError("回访时间必须晚于当前时间")
+        pending = [task for task in self.storage.followups.values() if task.umo == umo and task.status == "pending"]
+        if len(pending) >= max(1, int(settings.get("max_pending_per_session", 10))):
+            raise ValueError("当前会话待执行回访数量已达上限")
+        persona = await self.personas.resolve(umo)
+        task = FollowupTask(
+            id=uuid.uuid4().hex[:12],
+            umo=umo,
+            persona_id=persona.id,
+            scheduled_at=run_at.isoformat(),
+            intent=intent.strip(),
+            created_at=self._now().isoformat(),
+        )
+        if not task.intent:
+            raise ValueError("回访意图不能为空")
+        self.storage.followups[task.id] = task
+        await self.storage.save_followups()
+        self._schedule_followup_job(task, run_at)
+        return task
+
+    async def _run_followup(self, task_id: str) -> None:
+        task = self.storage.followups.get(task_id)
+        if not task or task.status != "pending":
+            return
+        for attempt in range(3):
+            try:
+                persona, plan = await self._ensure_plan_for_umo(task.umo)
+                await self._deliver(task.umo, persona, plan, "用户明确委托的回访：" + task.intent, 0)
+                task.status = "completed"
+                break
+            except Exception as exc:
+                task.last_error = str(exc)
+                if attempt < 2:
+                    await asyncio.sleep(2 + attempt * 3)
+                    continue
+                task.status = "failed"
+                logger.error("[主动虚拟日程] 回访 %s 发送失败: %s", task.id, exc)
+        await self.storage.save_followups()
+
+    async def _cancel_followup(self, umo: str, task_id: str) -> bool:
+        task = self.storage.followups.get(task_id)
+        if not task or task.umo != umo or task.status != "pending":
+            return False
+        task.status = "cancelled"
+        self.runtime.remove(f"pvd:followup:{task.id}")
+        await self.storage.save_followups()
+        return True
+
+    def _pending_followups(self, umo: str) -> list[FollowupTask]:
+        return sorted(
+            (task for task in self.storage.followups.values() if task.umo == umo and task.status == "pending"),
+            key=lambda task: task.scheduled_at,
+        )
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE, priority=999)
+    async def on_friend_message(self, event: AstrMessageEvent) -> None:
+        await self._handle_incoming(event.unified_msg_origin)
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=998)
+    async def on_group_message(self, event: AstrMessageEvent) -> None:
+        await self._handle_incoming(event.unified_msg_origin)
+
+    async def _handle_incoming(self, umo: str) -> None:
+        if not self.policy.is_enabled(umo):
+            return
+        self.policy.record_incoming(umo, self._now())
+        await self.storage.save_sessions()
+        self._schedule_idle(umo)
+
+    @filter.on_llm_request()
+    async def inject_virtual_state(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
+        if not self.config.get("context_injection", True):
+            return
+        try:
+            _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        except RuntimeError:
+            return
+        if plan.status != "ok":
+            return
+        now = self._now()
+        current = timeline_item_at(plan, now)
+        if not current:
+            return
+        injection = (
+            "<character_state>\n"
+            f"时间：{now.strftime('%Y-%m-%d %H:%M')}\n"
+            f"当前活动：{current.activity}\n"
+            f"地点：{current.location or '未说明'}\n"
+            f"状态：{current.state}，可打扰度：{current.availability}\n"
+            "普通回复必须与该状态保持一致；需要完整安排时调用 get_virtual_daily_schedule。\n"
+            "只有用户明确要求稍后提醒、到点联系或询问后续时，才可调用 schedule_proactive_followup。"
+            "若用户提前汇报了结果，应先查询任务并调用 cancel_proactive_followup。\n"
+            "</character_state>"
+        )
+        req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
+
+    @filter.llm_tool(name="get_virtual_daily_schedule")
+    async def get_virtual_daily_schedule(self, event: AstrMessageEvent) -> str:
+        """查询机器人当前人格的完整虚拟日程、穿搭与当前活动。"""
+        _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        return "今日暂无可用日程。" if plan.status != "ok" else format_plan(plan, self._now())
+
+    @filter.llm_tool(name="schedule_proactive_followup")
+    async def schedule_proactive_followup(self, event: AstrMessageEvent, scheduled_at: str, intent: str) -> str:
+        """仅在用户明确要求稍后联系、提醒或询问结果时创建一次回访。scheduled_at 必须是明确的 ISO 8601 时间；时间不明确时先询问用户。"""
+        try:
+            task = await self._create_followup(event.unified_msg_origin, scheduled_at, intent)
+            return f"已安排回访，任务 ID={task.id}，时间={task.scheduled_at}。"
+        except ValueError as exc:
+            return f"无法安排回访：{exc}"
+
+    @filter.llm_tool(name="list_proactive_followups")
+    async def list_proactive_followups(self, event: AstrMessageEvent) -> str:
+        """列出当前会话所有待执行的主动回访任务。"""
+        tasks = self._pending_followups(event.unified_msg_origin)
+        return "当前没有待执行回访。" if not tasks else "\n".join(f"{task.id} | {task.scheduled_at} | {task.intent}" for task in tasks)
+
+    @filter.llm_tool(name="cancel_proactive_followup")
+    async def cancel_proactive_followup(self, event: AstrMessageEvent, task_id: str) -> str:
+        """当用户取消请求或已经提前汇报结果时，取消当前会话指定的回访任务。"""
+        return "已取消回访。" if await self._cancel_followup(event.unified_msg_origin, task_id) else "未找到可取消的回访任务。"
+
+    @filter.command("查看虚拟日程", alias={"virtual daily"})
+    async def show_schedule(self, event: AstrMessageEvent):
+        _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        yield event.plain_result("今日暂无可用日程。" if plan.status != "ok" else format_plan(plan, self._now()))
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("重写虚拟日程")
+    async def rewrite_schedule(self, event: AstrMessageEvent, extra: str | None = None):
+        persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin, force=True, extra=extra or "")
+        for umo in self.policy.enabled_sessions():
+            resolved = await self.personas.resolve(umo)
+            if resolved.id == persona.id:
+                await self._schedule_session(umo, resolved, plan)
+        yield event.plain_result("重写失败，请检查 LLM 输出。" if plan.status != "ok" else format_plan(plan, self._now()))
+
+    @filter.command("主动消息状态")
+    async def proactive_status(self, event: AstrMessageEvent):
+        persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        state = self.policy.ensure_state(event.unified_msg_origin, persona.id, plan, self._now())
+        pending = len(self._pending_followups(event.unified_msg_origin))
+        yield event.plain_result(
+            f"人格：{persona.id}\n今日预算：{state.sent_count}/{state.daily_budget}\n"
+            f"连续未回复：{state.unanswered_count}\n待执行回访：{pending}"
+        )
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("立即主动")
+    async def trigger_now(self, event: AstrMessageEvent):
+        persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        await self._deliver(event.unified_msg_origin, persona, plan, "管理员要求立即测试主动消息", 0)
+        yield event.plain_result("测试主动消息已发送。")
+
+    @filter.command("回访列表")
+    async def followup_list_command(self, event: AstrMessageEvent):
+        yield event.plain_result(await self.list_proactive_followups(event))
+
+    @filter.command("取消回访")
+    async def followup_cancel_command(self, event: AstrMessageEvent, task_id: str):
+        yield event.plain_result(await self.cancel_proactive_followup(event, task_id))
+
+    @filter.command("sid")
+    async def show_sid(self, event: AstrMessageEvent):
+        yield event.plain_result(event.unified_msg_origin)

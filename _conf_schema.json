@@ -1,0 +1,85 @@
+{
+  "schedule_settings": {
+    "description": "📅 虚拟日程生成设置",
+    "type": "object",
+    "items": {
+      "generate_time": {"description": "每日生成时间 HH:MM", "type": "string", "default": "07:00"},
+      "llm_provider": {"description": "日程与主动消息使用的 LLM 供应商，留空使用当前供应商", "type": "string", "default": ""},
+      "history_days": {"description": "保留历史日程天数", "type": "int", "default": 14},
+      "generation_retries": {"description": "日程生成失败重试次数", "type": "int", "default": 1},
+      "prompt_template": {
+        "description": "结构化日程生成提示词",
+        "type": "text",
+        "default": "你正在为自己规划虚拟的一天。\n日期：{date} {weekday}\n节假日：{holiday}\n人格设定：\n{persona}\n\n创意约束：\n- 主题：{theme}\n- 心情：{mood}\n- 穿搭风格：{outfit_style}\n\n只输出 JSON 对象，不要 Markdown。字段必须包含 date、theme、mood、outfit、timeline、proactive_windows、budget_bonus。timeline 每项包含 id、start、end、activity、location、state、availability；state 只能是 sleep/busy/focus/transit/available/social，availability 只能是 blocked/low/normal/high。proactive_windows 每项包含 id、at、intent、audience、source_item_id；audience 只能是 private/group/both。budget_bonus 包含 private 和 group 整数。时间均为 HH:MM，日程必须覆盖完整一天且不可重叠。"
+      }
+    }
+  },
+  "creative_pool": {
+    "description": "🎲 日程创意池",
+    "type": "object",
+    "items": {
+      "themes": {"description": "每日主题池", "type": "list", "default": ["探索日", "宅家日", "工作日", "自我提升日", "休闲日", "社交日", "运动日", "文艺日"]},
+      "moods": {"description": "心情池", "type": "list", "default": ["慵懒", "活力", "温柔", "俏皮", "知性", "随性", "浪漫", "清新"]},
+      "outfit_styles": {"description": "穿搭风格池", "type": "list", "default": ["日常休闲风", "温柔淑女风", "酷飒中性风", "慵懒居家风", "精致约会风", "运动活力风", "复古文艺风", "极简都市风"]}
+    }
+  },
+  "friend_settings": {
+    "description": "👤 私聊主动消息",
+    "type": "object",
+    "items": {
+      "enable": {"description": "启用私聊主动消息", "type": "bool", "default": true},
+      "session_list": {"description": "允许主动消息的私聊 UMO 白名单", "type": "list", "default": []},
+      "idle_min_minutes": {"description": "沉默触发最短时间", "type": "int", "default": 90},
+      "idle_max_minutes": {"description": "沉默触发最长时间", "type": "int", "default": 240},
+      "cooldown_minutes": {"description": "两次非委托主动消息最短间隔", "type": "int", "default": 120},
+      "daily_budget_min": {"description": "随机日预算下限", "type": "int", "default": 1},
+      "daily_budget_max": {"description": "随机日预算上限", "type": "int", "default": 3},
+      "llm_bonus_max": {"description": "LLM 可增加的预算上限", "type": "int", "default": 2},
+      "daily_hard_max": {"description": "每日硬上限", "type": "int", "default": 5}
+    }
+  },
+  "group_settings": {
+    "description": "👥 群聊主动消息",
+    "type": "object",
+    "items": {
+      "enable": {"description": "启用群聊主动消息", "type": "bool", "default": false},
+      "session_list": {"description": "允许主动消息的群聊 UMO 白名单", "type": "list", "default": []},
+      "idle_min_minutes": {"description": "群聊沉默触发最短时间", "type": "int", "default": 45},
+      "idle_max_minutes": {"description": "群聊沉默触发最长时间", "type": "int", "default": 120},
+      "cooldown_minutes": {"description": "两次非委托主动消息最短间隔", "type": "int", "default": 180},
+      "daily_budget_min": {"description": "随机日预算下限", "type": "int", "default": 0},
+      "daily_budget_max": {"description": "随机日预算上限", "type": "int", "default": 1},
+      "llm_bonus_max": {"description": "LLM 可增加的预算上限", "type": "int", "default": 1},
+      "daily_hard_max": {"description": "每日硬上限", "type": "int", "default": 2}
+    }
+  },
+  "delivery_settings": {
+    "description": "📨 发送与安全限制",
+    "type": "object",
+    "items": {
+      "max_unanswered": {"description": "连续未回复暂停阈值", "type": "int", "default": 3},
+      "sleep_exception_probability": {"description": "每个会话每日睡眠异常概率", "type": "float", "default": 0.08},
+      "minimum_idle_for_window_minutes": {"description": "日程节点发送前最短会话沉默", "type": "int", "default": 20},
+      "segment_reply": {"description": "启用分段发送", "type": "bool", "default": true},
+      "segment_max_chars": {"description": "每段最大字符数", "type": "int", "default": 80},
+      "segment_interval_seconds": {"description": "分段间隔秒数", "type": "float", "default": 1.2},
+      "recent_chat_messages": {"description": "生成主动消息参考的最近历史条数", "type": "int", "default": 8},
+      "proactive_prompt": {
+        "description": "主动消息提示词",
+        "type": "text",
+        "default": "你需要以当前人格自然地发起一条主动消息。当前时间：{current_time}。当前状态：{current_state}。触发原因：{intent}。连续未获回应：{unanswered_count} 次。结合会话历史，只输出要发送的消息正文，不要解释任务。"
+      }
+    }
+  },
+  "followup_settings": {
+    "description": "⏰ 用户委托回访",
+    "type": "object",
+    "items": {
+      "enable": {"description": "启用 LLM 回访工具", "type": "bool", "default": true},
+      "misfire_grace_minutes": {"description": "重启后允许补发的延迟窗口", "type": "int", "default": 30},
+      "max_pending_per_session": {"description": "每个会话最多待执行回访", "type": "int", "default": 10}
+    }
+  },
+  "context_injection": {"description": "普通对话自动注入当前虚拟状态", "type": "bool", "default": true}
+}
+
