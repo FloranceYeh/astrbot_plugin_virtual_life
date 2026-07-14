@@ -170,7 +170,10 @@ class LongTermTimelineStore:
         admin_umo: str,
         created_at: str,
         requirements: str = "",
+        mode: str = "append",
     ) -> dict[str, Any]:
+        if mode not in {"append", "replace_all"}:
+            raise ValueError("草稿 mode 必须是 append 或 replace_all")
         draft = {
             "persona_id": persona_id,
             "stages": stages,
@@ -178,6 +181,7 @@ class LongTermTimelineStore:
             "admin_umo": admin_umo,
             "created_at": created_at,
             "requirements": requirements,
+            "mode": mode,
         }
         self.drafts[persona_id] = draft
         await self.save()
@@ -199,6 +203,8 @@ class LongTermTimelineStore:
         if not draft:
             raise ValueError("当前人格没有待批准草稿")
         approved = [dict(stage) for stage in draft["stages"]]
+        if draft.get("mode") == "replace_all":
+            self.stages = [stage for stage in self.stages if stage.get("persona_id") != persona_id]
         approved_ids = {stage["id"] for stage in approved}
         self.stages = [
             stage

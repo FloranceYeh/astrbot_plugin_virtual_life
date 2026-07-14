@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import random
 import re
 import uuid
@@ -16,7 +17,7 @@ from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.provider.entities import ProviderRequest
 
 from .core.generator import DailyPlanGenerator
-from .core.long_term import LongTermTimelineStore
+from .core.long_term import LongTermTimelineStore, validate_stage_bundle
 from .core.message_generator import ProactiveMessageGenerator
 from .core.models import DailyPlan, FollowupTask, ProactiveWindow
 from .core.persona import PersonaContext, PersonaResolver
@@ -478,6 +479,53 @@ class ProactiveVirtualDailyPlugin(Star):
             key=lambda task: task.scheduled_at,
         )
 
+    async def _refresh_persona_daily_plan(self, persona: PersonaContext) -> DailyPlan:
+        plan = await self._ensure_plan(persona, self._now().date(), force=True)
+        for umo in self.policy.enabled_sessions():
+            resolved = await self.personas.resolve(umo)
+            if resolved.id == persona.id:
+                await self._schedule_session(umo, resolved, plan)
+        return plan
+
+    async def _create_long_term_draft(
+        self,
+        *,
+        persona: PersonaContext,
+        admin_umo: str,
+        requirements: str,
+        start_date: date,
+        previous_stage: dict | None,
+        source: str,
+        mode: str,
+    ) -> dict:
+        stages = await self.plan_generator.generate_long_term_timeline(
+            persona,
+            start_date=start_date,
+            previous_stage=previous_stage,
+            requirements=requirements,
+        )
+        return await self.long_term.set_draft(
+            persona.id,
+            stages,
+            source=source,
+            admin_umo=admin_umo,
+            created_at=self._now().isoformat(),
+            requirements=requirements,
+            mode=mode,
+        )
+
+    @staticmethod
+    def _parse_long_term_json(content: str, persona_id: str) -> list[dict]:
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"结构化数据不是合法 JSON：{exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("结构化数据必须是 JSON 对象")
+        if "stages" not in payload:
+            payload = {"stages": [payload]}
+        return validate_stage_bundle(payload, persona_id)
+
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE, priority=999)
     async def on_friend_message(self, event: AstrMessageEvent) -> None:
         await self._handle_incoming(event.unified_msg_origin)
@@ -546,13 +594,18 @@ class ProactiveVirtualDailyPlugin(Star):
         """当用户取消请求或已经提前汇报结果时，取消当前会话指定的回访任务。"""
         return "已取消回访。" if await self._cancel_followup(event.unified_msg_origin, task_id) else "未找到可取消的回访任务。"
 
-    @filter.command("查看虚拟日程", alias={"virtual daily"})
+    @filter.command_group("虚拟日程")
+    def virtual_daily_group(self):
+        """查看和重写每日虚拟日程。"""
+        pass
+
+    @virtual_daily_group.command("查看")
     async def show_schedule(self, event: AstrMessageEvent):
         _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
         yield event.plain_result("今日暂无可用日程。" if plan.status != "ok" else format_plan(plan, self._now()))
 
+    @virtual_daily_group.command("重写")
     @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("重写虚拟日程")
     async def rewrite_schedule(self, event: AstrMessageEvent, extra: str | None = None):
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin, force=True, extra=extra or "")
         for umo in self.policy.enabled_sessions():
@@ -560,6 +613,138 @@ class ProactiveVirtualDailyPlugin(Star):
             if resolved.id == persona.id:
                 await self._schedule_session(umo, resolved, plan)
         yield event.plain_result("重写失败，请检查 LLM 输出。" if plan.status != "ok" else format_plan(plan, self._now()))
+
+    @filter.command_group("大时间表")
+    def long_term_group(self):
+        """管理当前人格的校历、工期等长期阶段。"""
+        pass
+
+    @long_term_group.command("生成")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def long_term_generate(self, event: AstrMessageEvent, requirements: str | None = None):
+        persona = await self.personas.resolve(event.unified_msg_origin)
+        latest = self.long_term.latest_stage(persona.id)
+        start = date.fromisoformat(latest["end_date"]) + timedelta(days=1) if latest else self._now().date()
+        try:
+            draft = await self._create_long_term_draft(
+                persona=persona,
+                admin_umo=event.unified_msg_origin,
+                requirements=requirements or "",
+                start_date=start,
+                previous_stage=latest,
+                source="natural",
+                mode="append",
+            )
+        except Exception as exc:
+            yield event.plain_result(f"生成草稿失败：{exc}")
+            return
+        yield event.plain_result("已生成大时间表草稿，使用 /大时间表 草稿 查看，确认后执行 /大时间表 批准。\n" + json.dumps(draft["stages"], ensure_ascii=False, indent=2))
+
+    @long_term_group.command("导入")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def long_term_import(self, event: AstrMessageEvent, content: str):
+        persona = await self.personas.resolve(event.unified_msg_origin)
+        try:
+            stages = self._parse_long_term_json(content, persona.id)
+            await self.long_term.set_draft(
+                persona.id,
+                stages,
+                source="json",
+                admin_umo=event.unified_msg_origin,
+                created_at=self._now().isoformat(),
+                requirements="结构化数据导入",
+                mode="replace_all",
+            )
+        except Exception as exc:
+            yield event.plain_result(f"导入草稿失败：{exc}")
+            return
+        yield event.plain_result("结构化数据已保存为草稿，确认后执行 /大时间表 批准。")
+
+    @long_term_group.command("草稿")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def long_term_draft(self, event: AstrMessageEvent):
+        persona = await self.personas.resolve(event.unified_msg_origin)
+        draft = self.long_term.get_draft(persona.id)
+        yield event.plain_result("当前人格没有待批准草稿。" if not draft else json.dumps(draft, ensure_ascii=False, indent=2))
+
+    @long_term_group.command("批准")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def long_term_approve(self, event: AstrMessageEvent):
+        persona = await self.personas.resolve(event.unified_msg_origin)
+        try:
+            approved = await self.long_term.approve_draft(persona.id, event.unified_msg_origin)
+            await self._refresh_persona_daily_plan(persona)
+        except Exception as exc:
+            yield event.plain_result(f"批准失败：{exc}")
+            return
+        yield event.plain_result("大时间表已生效并重生成今日日程：" + "、".join(stage["name"] for stage in approved))
+
+    @long_term_group.command("拒绝")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def long_term_reject(self, event: AstrMessageEvent, feedback: str | None = None):
+        persona = await self.personas.resolve(event.unified_msg_origin)
+        draft = self.long_term.get_draft(persona.id)
+        if not draft:
+            yield event.plain_result("当前人格没有待拒绝草稿。")
+            return
+        await self.long_term.reject_draft(persona.id)
+        if not feedback:
+            yield event.plain_result("草稿已拒绝并删除。")
+            return
+        start = date.fromisoformat(draft["stages"][0]["start_date"])
+        previous = self.long_term.latest_stage(persona.id) if draft.get("mode") == "append" else None
+        requirements = "；".join(part for part in (draft.get("requirements", ""), f"修改意见：{feedback}") if part)
+        try:
+            replacement = await self._create_long_term_draft(
+                persona=persona,
+                admin_umo=event.unified_msg_origin,
+                requirements=requirements,
+                start_date=start,
+                previous_stage=previous,
+                source="revision",
+                mode=str(draft.get("mode", "append")),
+            )
+        except Exception as exc:
+            yield event.plain_result(f"草稿已拒绝，但重新生成失败：{exc}")
+            return
+        yield event.plain_result("已按修改意见重新生成草稿：\n" + json.dumps(replacement["stages"], ensure_ascii=False, indent=2))
+
+    @long_term_group.command("列表")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def long_term_list(self, event: AstrMessageEvent):
+        persona = await self.personas.resolve(event.unified_msg_origin)
+        stages = self.long_term.list_for_persona(persona.id)
+        if not stages:
+            yield event.plain_result("当前人格没有已批准的大时间表。")
+            return
+        yield event.plain_result("\n".join(f"{stage['id']} | {stage['name']} | {stage['kind']} | {stage['start_date']} 至 {stage['end_date']} | 优先级 {stage['priority']}" for stage in stages))
+
+    @long_term_group.command("查看")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def long_term_view(self, event: AstrMessageEvent, stage_id: str):
+        persona = await self.personas.resolve(event.unified_msg_origin)
+        stage = self.long_term.find(persona.id, stage_id)
+        yield event.plain_result("未找到该阶段。" if not stage else json.dumps(stage, ensure_ascii=False, indent=2))
+
+    @long_term_group.command("重生成")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def long_term_regenerate(self, event: AstrMessageEvent, requirements: str | None = None):
+        persona = await self.personas.resolve(event.unified_msg_origin)
+        previous = self.long_term.latest_stage(persona.id)
+        try:
+            draft = await self._create_long_term_draft(
+                persona=persona,
+                admin_umo=event.unified_msg_origin,
+                requirements=requirements or "重新规划完整大时间表",
+                start_date=self._now().date(),
+                previous_stage=previous,
+                source="regenerate",
+                mode="replace_all",
+            )
+        except Exception as exc:
+            yield event.plain_result(f"重生成草稿失败：{exc}")
+            return
+        yield event.plain_result("已生成替换全部阶段的草稿，批准后才会生效。\n" + json.dumps(draft["stages"], ensure_ascii=False, indent=2))
 
     @filter.command("主动消息状态")
     async def proactive_status(self, event: AstrMessageEvent):
