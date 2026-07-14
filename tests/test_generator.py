@@ -213,8 +213,13 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stages[0]["start_date"], "2027-02-20")
         self.assertEqual(stages[0]["priority"], 75)
         self.assertIn("priority", provider.system_prompts[0])
-        self.assertIn("high, medium, low", provider.system_prompts[0])
-        self.assertIn("non-empty start and end", provider.system_prompts[0])
+        self.assertIn("text values such as high, medium, or low", provider.system_prompts[0])
+        self.assertIn("start and end must be non-empty", provider.system_prompts[0])
+        self.assertIn("unique integers from 1 to 7", provider.system_prompts[0])
+        self.assertIn("required must be a JSON boolean", provider.system_prompts[0])
+        self.assertIn("Special period rules", provider.system_prompts[0])
+        self.assertIn("non-negative JSON integer", provider.system_prompts[0])
+        self.assertIn("self-check every field", provider.system_prompts[0])
         self.assertIn("前一阶段：寒假", provider.prompts[0])
 
 
