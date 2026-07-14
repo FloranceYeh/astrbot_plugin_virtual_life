@@ -181,7 +181,7 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
             "kind": "academic",
             "start_date": "2027-02-20",
             "end_date": "2027-07-10",
-            "priority": "high",
+            "priority": 75,
             "summary": "正常上课",
             "weekly_rules": [],
             "special_dates": [],

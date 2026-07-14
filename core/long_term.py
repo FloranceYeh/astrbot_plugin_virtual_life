@@ -8,43 +8,20 @@ from .models import minute_of_day
 from .storage import JsonRepository
 
 STAGE_KINDS = {"academic", "project", "custom"}
-PRIORITY_LABELS = {
-    "critical": 100,
-    "highest": 100,
-    "urgent": 100,
-    "紧急": 100,
-    "最高": 100,
-    "high": 75,
-    "高": 75,
-    "medium": 50,
-    "normal": 50,
-    "中": 50,
-    "普通": 50,
-    "low": 25,
-    "低": 25,
-    "lowest": 0,
-    "最低": 0,
-}
 
 
 def normalize_priority(value: object) -> int:
     if isinstance(value, bool):
-        raise ValueError("priority must be an integer from 0 to 100 or a common priority label, not a boolean")
+        raise ValueError("priority must be an integer from 0 to 100, not a boolean")
     if isinstance(value, int):
         priority = value
     elif isinstance(value, str):
-        normalized = value.strip().casefold()
-        if normalized in PRIORITY_LABELS:
-            priority = PRIORITY_LABELS[normalized]
-        else:
-            try:
-                priority = int(normalized)
-            except ValueError as exc:
-                raise ValueError(
-                    f"unrecognized priority {value!r}; use an integer from 0 to 100 or a label such as high, medium, or low"
-                ) from exc
+        try:
+            priority = int(value.strip())
+        except ValueError as exc:
+            raise ValueError("priority must be an integer from 0 to 100") from exc
     else:
-        raise ValueError("priority must be an integer from 0 to 100 or a common priority label")
+        raise ValueError("priority must be an integer from 0 to 100")
     if not 0 <= priority <= 100:
         raise ValueError("priority must be between 0 and 100")
     return priority

@@ -24,21 +24,16 @@ def academic_stage():
 
 
 class LongTermTests(unittest.IsolatedAsyncioTestCase):
-    def test_validation_normalizes_text_priority(self):
+    def test_validation_rejects_text_priority(self):
         value = academic_stage()
         value["priority"] = "high"
-        self.assertEqual(validate_stage(value, "student")["priority"], 75)
+        with self.assertRaisesRegex(ValueError, "priority must be an integer"):
+            validate_stage(value, "student")
 
     def test_validation_accepts_numeric_string_priority(self):
         value = academic_stage()
         value["priority"] = "42"
         self.assertEqual(validate_stage(value, "student")["priority"], 42)
-
-    def test_validation_rejects_unknown_priority(self):
-        value = academic_stage()
-        value["priority"] = "sometimes"
-        with self.assertRaisesRegex(ValueError, "unrecognized priority"):
-            validate_stage(value, "student")
 
     def test_validation_sets_persona_and_kind(self):
         stage = validate_stage(academic_stage(), "student")
