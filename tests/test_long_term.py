@@ -24,6 +24,12 @@ def academic_stage():
 
 
 class LongTermTests(unittest.IsolatedAsyncioTestCase):
+    def test_validation_rejects_empty_event_time_with_clear_error(self):
+        value = academic_stage()
+        value["special_dates"][0]["start"] = ""
+        with self.assertRaisesRegex(ValueError, "requires non-empty start and end"):
+            validate_stage(value, "student")
+
     def test_validation_rejects_text_priority(self):
         value = academic_stage()
         value["priority"] = "high"

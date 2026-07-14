@@ -16,7 +16,12 @@ AUDIENCES = {"private", "group", "both"}
 def parse_hhmm(value: str, *, allow_2400: bool = False) -> time:
     if allow_2400 and value == "24:00":
         return time.max
-    parsed = datetime.strptime(value, "%H:%M").time()
+    if not isinstance(value, str) or not value:
+        raise ValueError("time must be a non-empty HH:MM string")
+    try:
+        parsed = datetime.strptime(value, "%H:%M").time()
+    except ValueError as exc:
+        raise ValueError(f"invalid HH:MM value: {value!r}") from exc
     if parsed.strftime("%H:%M") != value:
         raise ValueError(f"invalid HH:MM value: {value}")
     return parsed

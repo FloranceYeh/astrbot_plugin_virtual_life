@@ -163,6 +163,8 @@ class DailyPlanGenerator:
                 f"{previous_stage.get('summary') or '无说明'}"
             )
         system_prompt = (
+            "Every weekly_rules and special_dates item must contain non-empty start and end values in HH:MM format; "
+            "if there are no items, output an empty array and never use empty strings or null time values."
             "priority 必须是 0 至 100 的 JSON 整数，禁止使用 high, medium, low 等文本值。"
             "你是严格的大时间表规划器。只输出一个 JSON 对象，不要 Markdown、代码块或解释。"
             "JSON 顶层必须是 stages 数组，包含 1 至 3 个首尾连续的阶段。"

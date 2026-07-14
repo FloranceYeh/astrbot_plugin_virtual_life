@@ -86,7 +86,14 @@ def _validate_event(raw: dict[str, Any]) -> dict[str, Any]:
     event["participants"] = _strings(event.get("participants", []))
     if not event["title"]:
         raise ValueError("固定事件 title 不能为空")
-    if minute_of_day(event["start"]) >= minute_of_day(event["end"]):
+    try:
+        start_minute = minute_of_day(event["start"])
+        end_minute = minute_of_day(event["end"])
+    except ValueError as exc:
+        raise ValueError(
+            f"fixed event {event['title']!r} requires non-empty start and end in HH:MM"
+        ) from exc
+    if start_minute >= end_minute:
         raise ValueError(f"固定事件时间无效: {event['title']}")
     event["required"] = bool(event.get("required", True))
     return event

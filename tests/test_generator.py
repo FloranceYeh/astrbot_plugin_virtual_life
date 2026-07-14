@@ -214,6 +214,7 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stages[0]["priority"], 75)
         self.assertIn("priority", provider.system_prompts[0])
         self.assertIn("high, medium, low", provider.system_prompts[0])
+        self.assertIn("non-empty start and end", provider.system_prompts[0])
         self.assertIn("前一阶段：寒假", provider.prompts[0])
 
 

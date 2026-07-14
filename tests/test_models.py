@@ -23,6 +23,12 @@ def valid_payload():
 
 
 class ModelTests(unittest.TestCase):
+    def test_empty_timeline_time_has_clear_error(self):
+        payload = valid_payload()
+        payload["timeline"][0]["start"] = ""
+        with self.assertRaisesRegex(ValueError, "non-empty HH:MM"):
+            DailyPlan.from_dict(payload)
+
     def test_valid_structured_plan(self):
         plan = DailyPlan.from_dict(valid_payload())
         self.assertEqual(plan.private_bonus, 2)
@@ -43,4 +49,3 @@ class ModelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
