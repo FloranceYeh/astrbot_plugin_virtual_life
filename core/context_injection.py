@@ -45,8 +45,12 @@ class SmartContextInjector:
             return "", (), limit
         normalized_text = self._normalize(user_text)
         matched = {key: self._matches(normalized_text, key) for key in DEFAULT_KEYWORDS}
-        sections = [self._base_section(plan, now, current)]
-        modules = ["base"]
+        sections = []
+        modules = []
+
+        if self.settings.get("base_module_enable", False):
+            sections.append(self._base_section(plan, now, current))
+            modules.append("base")
 
         if matched["full_query_keywords"]:
             modules.append("full_query")
@@ -122,7 +126,6 @@ class SmartContextInjector:
 
     def _base_section(self, plan: DailyPlan, now: datetime, current: TimelineItem) -> str:
         return (
-            "<character_state>\n"
             f"时间：{now.strftime('%Y-%m-%d %H:%M')}\n"
             f"当前活动：{current.activity}\n"
             f"地点：{current.location or '未说明'}\n"
@@ -196,7 +199,7 @@ class SmartContextInjector:
         parts = [section for section in sections if section]
         if not parts:
             return ""
-        content = "\n".join(parts)
+        content = "<character_state>\n" + "\n".join(parts)
         closing = "\n</character_state>"
         if len(content) + len(closing) > limit:
             content = content[: max(0, limit - len(closing) - 1)] + "…"

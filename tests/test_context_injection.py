@@ -57,8 +57,19 @@ class SmartContextInjectionTests(unittest.TestCase):
         self.plan = plan()
         self.long_term = long_term()
 
-    def test_base_state_is_always_injected(self):
+    def test_base_state_is_disabled_by_default(self):
         content = SmartContextInjector().build(self.plan, self.now, self.long_term, "你好！")
+
+        self.assertEqual(content, "")
+
+    def test_base_state_can_be_enabled(self):
+        content = SmartContextInjector({"base_module_enable": True}).build(
+            self.plan,
+            self.now,
+            self.long_term,
+            "你好！",
+        )
+
         self.assertIn("当前活动：自习", content)
         self.assertNotIn("今日穿搭", content)
         self.assertNotIn("当前大时间表阶段", content)
@@ -91,8 +102,18 @@ class SmartContextInjectionTests(unittest.TestCase):
             DEFAULT_KEYWORDS["schedule_keywords"][0] + DEFAULT_KEYWORDS["long_term_keywords"][0],
         )
         self.assertTrue(injection)
-        self.assertEqual(modules, ("base", "schedule", "long_term"))
+        self.assertEqual(modules, ("schedule", "long_term"))
         self.assertEqual(limit, 1600)
+
+    def test_base_module_is_reported_with_matched_modules(self):
+        _, modules, _ = SmartContextInjector({"base_module_enable": True}).build_details(
+            self.plan,
+            self.now,
+            self.long_term,
+            DEFAULT_KEYWORDS["schedule_keywords"][0],
+        )
+
+        self.assertEqual(modules, ("base", "schedule"))
 
     def test_length_limit_truncates_content(self):
         injector = SmartContextInjector({"max_chars": 400, "outfit_keywords": ["穿搭"], "underwear_keywords": [], "schedule_keywords": [], "long_term_keywords": [], "full_query_keywords": []})
