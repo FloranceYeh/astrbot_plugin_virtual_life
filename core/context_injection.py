@@ -30,30 +30,48 @@ class SmartContextInjector:
         long_term,
         user_text: str,
     ) -> str:
+        return self.build_details(plan, now, long_term, user_text)[0]
+
+    def build_details(
+        self,
+        plan: DailyPlan,
+        now: datetime,
+        long_term,
+        user_text: str,
+    ) -> tuple[str, tuple[str, ...], int]:
+        limit = self._max_chars()
         current = self._current_item(plan, now)
         if not current:
-            return ""
-        limit = self._max_chars()
+            return "", (), limit
         normalized_text = self._normalize(user_text)
         matched = {key: self._matches(normalized_text, key) for key in DEFAULT_KEYWORDS}
         sections = [self._base_section(plan, now, current)]
+        modules = ["base"]
 
         if matched["full_query_keywords"]:
+            modules.append("full_query")
             tool_name = "get_long_term_timeline" if self._is_long_term_request(normalized_text, matched) else "get_virtual_daily_schedule"
             sections.append(
                 "用户明确请求完整信息：必须优先调用 "
                 f"{tool_name}，不要凭当前摘要补全未查询的数据。"
             )
         if matched["schedule_keywords"]:
+            modules.append("schedule")
             sections.append(self._schedule_section(plan, now, current))
         if matched["long_term_keywords"]:
+            modules.append("long_term")
             sections.extend(self._long_term_sections(long_term, plan.persona_id, now.date()))
         if matched["outfit_keywords"]:
+            modules.append("outfit")
+            if matched["underwear_keywords"]:
+                modules.append("underwear")
             sections.append(self._outfit_section(plan, include_underwear=matched["underwear_keywords"]))
         elif matched["underwear_keywords"]:
+            modules.append("underwear")
             sections.append(self._outfit_section(plan, include_underwear=True, underwear_only=True))
 
-        return self._join_with_limit(sections, limit)
+        injection = self._join_with_limit(sections, limit)
+        return injection, tuple(modules), limit
 
     def _max_chars(self) -> int:
         try:

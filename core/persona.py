@@ -24,7 +24,7 @@ class PersonaResolver:
                     conversation = await self.context.conversation_manager.get_conversation(umo, conversation_id)
                     conversation_persona_id = getattr(conversation, "persona_id", None)
             except Exception as exc:
-                logger.warning("[主动虚拟日程] 读取会话人格失败 %s: %s", umo, exc)
+                logger.warning("[虚拟人生] 读取会话人格失败 %s: %s", umo, exc)
 
         if conversation_persona_id and conversation_persona_id != "[%None]":
             try:
@@ -41,7 +41,7 @@ class PersonaResolver:
             prompt = str(persona.get("prompt", "") or "You are a helpful and friendly assistant.")
             return PersonaContext(persona_id, prompt)
         except Exception as exc:
-            logger.warning("[主动虚拟日程] 回退默认人格: %s", exc)
+            logger.warning("[虚拟人生] 回退默认人格: %s", exc)
             return PersonaContext("default", "You are a helpful and friendly assistant.")
 
     async def resolve_id(self, persona_id: str, fallback_umo: str | None = None) -> PersonaContext:

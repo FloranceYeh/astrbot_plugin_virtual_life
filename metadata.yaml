@@ -1,9 +1,9 @@
-name: astrbot_plugin_proactive_virtual_daily
-display_name: 主动虚拟日程与大时间表
-desc: 按人格管理校历、工期等长期阶段，智能注入虚拟状态并主动发送消息
+name: astrbot_plugin_virtual_life
+display_name: 虚拟人生
+desc: Virtual Life：按人格管理长期阶段、虚拟日程与主动消息
 version: v1.4.0
 author: Florance
-repo: https://github.com/FloranceYeh/astrbot_plugin_proactive_virtual_daily
+repo: https://github.com/FloranceYeh/astrbot_plugin_virtual_life
 astrbot_version: ">=4.26.0"
 support_platforms:
   - aiocqhttp

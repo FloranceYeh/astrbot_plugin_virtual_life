@@ -43,7 +43,7 @@ class ProactiveVirtualDailyPlugin(Star):
         super().__init__(context)
         self.context = context
         self.config = config
-        self.data_dir = StarTools.get_data_dir("astrbot_plugin_proactive_virtual_daily")
+        self.data_dir = StarTools.get_data_dir("astrbot_plugin_virtual_life")
         self.storage = PluginStorage(self.data_dir)
         self.personas = PersonaResolver(context)
         self.plan_generator = DailyPlanGenerator(context, config)
@@ -80,7 +80,7 @@ class ProactiveVirtualDailyPlugin(Star):
         self.runtime.start(generate_time, self._daily_refresh)
         await self._refresh_all(force=False)
         await self._restore_followups()
-        logger.info("[主动虚拟日程] 插件已启动，时区=%s", self.timezone.key)
+        logger.info("[虚拟人生] 插件已启动，时区=%s", self.timezone.key)
 
     async def terminate(self) -> None:
         self.runtime.stop()
@@ -289,7 +289,7 @@ class ProactiveVirtualDailyPlugin(Star):
             current_item = timeline_item_at(plan, now)
             decision = self.policy.evaluate(umo=umo, state=state, current_item=current_item, now=now, trigger=trigger)
             if not decision.allowed:
-                logger.info("[主动虚拟日程] 跳过 %s: %s", umo, decision.reason)
+                logger.info("[虚拟人生] 跳过 %s: %s", umo, decision.reason)
                 return False, decision.reason
             await self._deliver(umo, persona, plan, intent, state.unanswered_count)
             self.policy.record_delivery(state, now)
@@ -419,7 +419,7 @@ class ProactiveVirtualDailyPlugin(Star):
         try:
             await self.context.send_message(umo, MessageChain().message(text))
         except Exception as exc:
-            logger.error("[主动虚拟日程] 管理员通知发送失败 %s: %s", umo, exc)
+            logger.error("[虚拟人生] 管理员通知发送失败 %s: %s", umo, exc)
 
     def _schedule_followup_job(self, task: FollowupTask, run_at: datetime) -> None:
         grace = max(1, int((self.config.get("followup_settings", {}) or {}).get("misfire_grace_minutes", 30)))
@@ -473,7 +473,7 @@ class ProactiveVirtualDailyPlugin(Star):
                     await asyncio.sleep(2 + attempt * 3)
                     continue
                 task.status = "failed"
-                logger.error("[主动虚拟日程] 回访 %s 发送失败: %s", task.id, exc)
+                logger.error("[虚拟人生] 回访 %s 发送失败: %s", task.id, exc)
         await self.storage.save_followups()
 
     async def _cancel_followup(self, umo: str, task_id: str) -> bool:
@@ -534,7 +534,7 @@ class ProactiveVirtualDailyPlugin(Star):
         try:
             paths = [await job() for job in jobs]
         except Exception:
-            logger.exception("[主动虚拟日程] 图片渲染失败，回退文字输出")
+            logger.exception("[虚拟人生] 图片渲染失败，回退文字输出")
             return [event.plain_result("图片渲染失败，已切换为文字模式。\n" + fallback)]
         return [event.plain_result(title), *(event.image_result(path) for path in paths)]
 
@@ -575,7 +575,7 @@ class ProactiveVirtualDailyPlugin(Star):
             return
         if plan.status != "ok":
             return
-        injection = self.smart_context_injector.build(
+        injection, modules, limit = self.smart_context_injector.build_details(
             plan,
             self._now(),
             self.long_term,
@@ -583,6 +583,13 @@ class ProactiveVirtualDailyPlugin(Star):
         )
         if injection:
             req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
+            logger.info(
+                "[虚拟人生] 智能状态注入 persona=%s modules=%s chars=%s limit=%s",
+                plan.persona_id,
+                ",".join(modules),
+                len(injection),
+                limit,
+            )
 
     @filter.llm_tool(name="get_virtual_daily_schedule")
     async def get_virtual_daily_schedule(self, event: AstrMessageEvent) -> str:

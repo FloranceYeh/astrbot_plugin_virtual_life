@@ -2,7 +2,7 @@ import unittest
 from datetime import date, datetime
 from pathlib import Path
 
-from core.context_injection import SmartContextInjector
+from core.context_injection import DEFAULT_KEYWORDS, SmartContextInjector
 from core.long_term import LongTermTimelineStore, validate_stage
 from core.models import DailyPlan
 from tests.fixtures import outfit_payload
@@ -82,6 +82,17 @@ class SmartContextInjectionTests(unittest.TestCase):
     def test_full_query_requests_tool(self):
         content = SmartContextInjector().build(self.plan, self.now, self.long_term, "给我完整大时间表")
         self.assertIn("get_long_term_timeline", content)
+
+    def test_details_report_only_matched_modules(self):
+        injection, modules, limit = SmartContextInjector().build_details(
+            self.plan,
+            self.now,
+            self.long_term,
+            DEFAULT_KEYWORDS["schedule_keywords"][0] + DEFAULT_KEYWORDS["long_term_keywords"][0],
+        )
+        self.assertTrue(injection)
+        self.assertEqual(modules, ("base", "schedule", "long_term"))
+        self.assertEqual(limit, 1600)
 
     def test_length_limit_truncates_content(self):
         injector = SmartContextInjector({"max_chars": 400, "outfit_keywords": ["穿搭"], "underwear_keywords": [], "schedule_keywords": [], "long_term_keywords": [], "full_query_keywords": []})

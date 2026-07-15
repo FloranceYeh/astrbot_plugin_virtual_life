@@ -86,7 +86,7 @@ class DailyPlanGenerator:
                 except Exception as exc:
                     last_error = str(exc)
                     logger.warning(
-                        "[主动虚拟日程] 日程生成校验失败 persona=%s attempt=%s: %s",
+                        "[虚拟人生] 日程生成校验失败 persona=%s attempt=%s: %s",
                         persona.id,
                         attempt + 1,
                         exc,

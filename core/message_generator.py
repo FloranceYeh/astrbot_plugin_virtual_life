@@ -74,5 +74,5 @@ class ProactiveMessageGenerator:
                 lines.append(f"{role}: {content}")
             return "\n".join(lines) or "无"
         except Exception as exc:
-            logger.debug("[主动虚拟日程] 读取历史失败 %s: %s", umo, exc)
+            logger.debug("[虚拟人生] 读取历史失败 %s: %s", umo, exc)
             return "无"

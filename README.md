@@ -1,4 +1,4 @@
-# 主动虚拟日程与大时间表
+# 虚拟人生（Virtual Life）
 
 一个独立的 AstrBot 插件：按当前生效人格维护校历、项目工期等长期阶段，生成结构化每日虚拟日程，并根据日程状态、会话沉默和用户明确委托主动发送消息。
 
@@ -21,7 +21,7 @@
 
 ## 安装
 
-将目录放入 AstrBot 的 `data/plugins`，安装 `requirements.txt` 后重载插件。目标 AstrBot 版本为 `4.26.0` 及以上。
+将插件目录命名为 `astrbot_plugin_virtual_life` 后放入 AstrBot 的 `data/plugins`，安装 `requirements.txt` 并重载插件。
 
 ## 配置
 
