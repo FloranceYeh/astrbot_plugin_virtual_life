@@ -45,9 +45,11 @@ class SmartContextInjector:
         sections = []
         modules = []
 
-        if self.settings.get("base_module_enable", False):
-            sections.append(self._base_section(plan, now, current))
+        base_module_enabled = bool(self.settings.get("base_module_enable", False))
+        if base_module_enabled:
             modules.append("base")
+            if not schedule_matched:
+                sections.append(self._base_section(plan, now, current))
 
         if full_schedule_matched:
             modules.append("full_schedule_query")
@@ -129,7 +131,11 @@ class SmartContextInjector:
 
     def _schedule_section(self, plan: DailyPlan, now: datetime, current: TimelineItem) -> str:
         next_item = self._next_item(plan, now)
-        lines = [f"今日主题：{plan.theme}；心情：{plan.mood}。", f"当前时段：{current.start}-{current.end}。"]
+        lines = [
+            self._base_section(plan, now, current),
+            f"今日主题：{plan.theme}；心情：{plan.mood}。",
+            f"当前时段：{current.start}-{current.end}。",
+        ]
         if next_item:
             lines.append(f"下一项：{next_item.start}-{next_item.end} {next_item.activity}。")
         return "\n".join(lines)

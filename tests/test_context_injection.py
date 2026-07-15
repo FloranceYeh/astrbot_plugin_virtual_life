@@ -99,6 +99,24 @@ class SmartContextInjectionTests(unittest.TestCase):
         self.assertIn("当前大时间表阶段：秋季学期", content)
         self.assertIn("近期里程碑：2026-07-18 提交作业", content)
 
+    def test_schedule_includes_current_state_without_base_module(self):
+        content = SmartContextInjector(injection_settings()).build(self.plan, self.now, self.long_term, "在干嘛？")
+
+        self.assertIn("时间：2026-07-15 09:30", content)
+        self.assertIn("当前活动：自习", content)
+        self.assertIn("地点：图书馆", content)
+        self.assertIn("状态：focus，可打扰度：low", content)
+
+    def test_schedule_does_not_duplicate_current_state_with_base_module(self):
+        content = SmartContextInjector(injection_settings(base_module_enable=True)).build(
+            self.plan,
+            self.now,
+            self.long_term,
+            "在干嘛？",
+        )
+
+        self.assertEqual(content.count("当前活动：自习"), 1)
+
     def test_full_query_requests_tool(self):
         content = SmartContextInjector(injection_settings()).build(self.plan, self.now, self.long_term, "给我完整大时间表")
         self.assertIn("get_long_term_timeline", content)

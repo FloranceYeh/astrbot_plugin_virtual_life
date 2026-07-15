@@ -581,11 +581,12 @@ class ProactiveVirtualDailyPlugin(Star):
         if injection:
             req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
             logger.info(
-                "[虚拟人生] 智能状态注入 persona=%s modules=%s chars=%s limit=%s",
+                "[虚拟人生] 智能状态注入 persona=%s modules=%s chars=%s limit=%s\n%s",
                 plan.persona_id,
                 ",".join(modules),
                 len(injection),
                 limit,
+                injection,
             )
 
     @filter.llm_tool(name="get_virtual_daily_schedule")
