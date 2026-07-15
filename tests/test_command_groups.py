@@ -15,6 +15,11 @@ class CommandGroupContractTests(unittest.TestCase):
         self.assertNotIn('@filter.command("查看虚拟日程"', self.source)
         self.assertNotIn('@filter.command("重写虚拟日程"', self.source)
 
+    def test_virtual_life_group_contains_subscription(self):
+        self.assertIn('@filter.command_group("虚拟人生")', self.source)
+        self.assertIn('@virtual_life_group.command("订阅会话")', self.source)
+        self.assertIn("self.config.save_config()", self.source)
+
     def test_long_term_commands_share_group(self):
         self.assertIn('@filter.command_group("大时间表")', self.source)
         for command in ("生成", "导入", "草稿", "批准", "拒绝", "列表", "查看", "重生成"):

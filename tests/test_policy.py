@@ -64,6 +64,23 @@ class PolicyTests(unittest.TestCase):
         self.policy.record_incoming(self.umo, self.now + timedelta(minutes=1))
         self.assertEqual(state.unanswered_count, 0)
 
+    def test_subscribe_enables_and_adds_private_session(self):
+        self.config["friend_settings"]["enable"] = False
+        self.config["friend_settings"]["session_list"] = []
+
+        self.assertTrue(self.policy.subscribe(self.umo))
+        self.assertTrue(self.config["friend_settings"]["enable"])
+        self.assertEqual(self.config["friend_settings"]["session_list"], [self.umo])
+        self.assertTrue(self.policy.is_enabled(self.umo))
+        self.assertFalse(self.policy.subscribe(self.umo))
+
+    def test_subscribe_uses_group_settings(self):
+        umo = "aiocqhttp:GroupMessage:42"
+
+        self.assertTrue(self.policy.subscribe(umo))
+        self.assertTrue(self.config["group_settings"]["enable"])
+        self.assertEqual(self.config["group_settings"]["session_list"], [umo])
+
 
 if __name__ == "__main__":
     unittest.main()

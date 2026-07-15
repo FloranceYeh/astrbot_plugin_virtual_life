@@ -40,6 +40,18 @@ class ProactivePolicy:
         settings = self.settings_for(umo)
         return bool(settings.get("enable", False) and umo in settings.get("session_list", []))
 
+    def subscribe(self, umo: str) -> bool:
+        settings = self.settings_for(umo)
+        settings["enable"] = True
+        sessions = settings.get("session_list")
+        if not isinstance(sessions, list):
+            sessions = []
+            settings["session_list"] = sessions
+        if umo in sessions:
+            return False
+        sessions.append(umo)
+        return True
+
     def ensure_state(self, umo: str, persona_id: str, plan: DailyPlan, now: datetime) -> SessionState:
         date_str = now.date().isoformat()
         state = self.storage.sessions.get(umo)
@@ -110,4 +122,3 @@ class ProactivePolicy:
         state.sent_count += 1
         state.unanswered_count += 1
         state.last_proactive_at = now.isoformat()
-

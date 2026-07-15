@@ -632,6 +632,31 @@ class ProactiveVirtualDailyPlugin(Star):
         """当用户取消请求或已经提前汇报结果时，取消当前会话指定的回访任务。"""
         return "已取消回访。" if await self._cancel_followup(event.unified_msg_origin, task_id) else "未找到可取消的回访任务。"
 
+    @filter.command_group("虚拟人生")
+    def virtual_life_group(self):
+        """虚拟人生命令组；不提供子命令时由 AstrBot 输出帮助。"""
+        pass
+
+    @virtual_life_group.command("订阅会话")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def subscribe_session(self, event: AstrMessageEvent):
+        """订阅当前会话的主动消息。"""
+        umo = event.unified_msg_origin
+        added = self.policy.subscribe(umo)
+        self.config.save_config()
+        kind = "群聊" if session_kind(umo) == "group" else "私聊"
+        action = "已订阅" if added else "已刷新订阅"
+        logger.info("[虚拟人生] %s主动消息会话 umo=%s", action, umo)
+        try:
+            persona, plan = await self._ensure_plan_for_umo(umo)
+            await self._schedule_session(umo, persona, plan)
+            await self.storage.save_sessions()
+        except Exception as exc:
+            logger.warning("[虚拟人生] 订阅后即时调度失败 umo=%s: %s", umo, exc)
+            yield event.plain_result(f"{action}当前{kind}会话，但今日日程调度失败，请检查日志或稍后重试。")
+            return
+        yield event.plain_result(f"{action}当前{kind}会话，主动消息将在符合日程与发送规则时触发。")
+
     @filter.command_group("虚拟日程")
     def virtual_daily_group(self):
         """虚拟日程命令组；不提供子命令时由 AstrBot 输出帮助。"""
