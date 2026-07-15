@@ -15,7 +15,7 @@
 - 每个会话每天随机生成主动消息预算，LLM 只能在管理员硬上限内建议增加预算。
 - 连续三次主动消息无人回应后暂停，收到新消息后恢复。
 - 睡眠期间默认有 8% 概率出现一次梦醒、起夜或失眠式主动消息。
-- 普通聊天自动注入当前活动，完整日程通过命令或 LLM Tool 按需查询。
+- 普通聊天使用本地关键词智能注入当前虚拟状态；完整日程与完整大时间表通过 LLM Tool 按需查询，不重复塞入完整 JSON。
 - 用户明确要求时，LLM 可创建、查询和取消持久化的一次性回访任务。
 - 查看虚拟日程、大时间表草稿、阶段列表和阶段详情时使用时间轴与卡片图片；渲染失败自动回退文字。
 
@@ -38,6 +38,10 @@
 - `schedule_llm_provider`：通过 AstrBot 内置 Provider 选择器指定日程生成模型，留空使用当前供应商
 - `proactive_llm_provider`：通过 AstrBot 内置 Provider 选择器单独指定主动消息模型，留空使用当前供应商
 - 历史日程参考天数：`3`，设置为 `0` 可关闭
+- `smart_context_injection.enable`：普通聊天智能状态注入总开关，默认启用；不额外调用 LLM
+- `smart_context_injection.max_chars`：注入内容总字符上限，默认 `1600`，可设置 `400-8000`
+- `smart_context_injection.long_term_milestone_days`：注入近期里程碑的未来天数，默认 `7`，可设置 `0-90`
+- `smart_context_injection` 下的关键词列表分别控制穿搭、内衣、日程、大时间表和完整查询；管理员配置关键词后会完整替换默认列表
 - `generation_system_prompt` 会在独立系统消息中强制要求时间线完整覆盖 `00:00-24:00`、无空档和重叠，并要求模型输出前自检
 - 私聊随机预算：`1-3`，LLM 最多增加 `2`，硬上限 `5`
 - 群聊随机预算：`0-1`，LLM 最多增加 `1`，硬上限 `2`
@@ -78,11 +82,21 @@
 ## LLM Tools
 
 - `get_virtual_daily_schedule`
+- `get_long_term_timeline`
 - `schedule_proactive_followup`
 - `list_proactive_followups`
 - `cancel_proactive_followup`
 
 `schedule_proactive_followup` 只允许在用户明确提出稍后提醒、到点联系或询问结果时调用。工具参数 `scheduled_at` 必须是明确的 ISO 8601 时间；时间不明确时模型应先询问用户。
+
+## 智能状态注入
+
+启用 `smart_context_injection` 后，普通聊天始终注入当前时间、活动、地点、状态、可打扰程度以及回访工具约束。它只根据本地关键词追加需要的摘要，不额外请求 LLM：
+
+- 穿搭词追加外显穿搭；只有明确内衣、打底、贴身等词才追加内衣与打底信息。
+- 日程词追加主题、心情、当前时段和下一项活动。
+- 上课、考试、项目、工期等词追加当前阶段、固定事件、特殊时期、约束和近期里程碑。
+- 完整日程、校历、工期表等请求会提示模型优先调用 `get_virtual_daily_schedule` 或 `get_long_term_timeline`，而不是根据摘要虚构完整内容。
 
 ## 大时间表结构示例
 

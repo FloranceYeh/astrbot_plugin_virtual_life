@@ -1,7 +1,7 @@
 name: astrbot_plugin_proactive_virtual_daily
 display_name: 主动虚拟日程与大时间表
-desc: 按人格管理校历、工期等长期阶段，生成每日虚拟日程并结合当前状态主动发送消息
-version: v1.3.0
+desc: 按人格管理校历、工期等长期阶段，智能注入虚拟状态并主动发送消息
+version: v1.4.0
 author: Florance
 repo: https://github.com/FloranceYeh/astrbot_plugin_proactive_virtual_daily
 astrbot_version: ">=4.26.0"
