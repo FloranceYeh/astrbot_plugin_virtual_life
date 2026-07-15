@@ -73,7 +73,7 @@
 - `smart_context_injection.base_module_enable`：是否始终注入当前基础状态，默认关闭；关闭后仅在关键词命中时注入对应模块
 - `smart_context_injection.max_chars`：注入内容总字符上限，默认 `1600`，可设置 `400-8000`
 - `smart_context_injection.long_term_milestone_days`：注入近期里程碑的未来天数，默认 `7`，可设置 `0-90`
-- `smart_context_injection` 下的关键词列表分别控制穿搭、内衣、日程、大时间表和完整查询；管理员配置关键词后会完整替换默认列表
+- `smart_context_injection` 直接读取配置中的穿搭、内衣、日程、大时间表、完整日程和完整大时间表关键词列表；列表为空时对应模块不会触发
 - `generation_system_prompt` 会在独立系统消息中强制要求时间线完整覆盖 `00:00-24:00`、无空档和重叠，并要求模型输出前自检
 - 私聊随机预算：`1-3`，LLM 最多增加 `2`，硬上限 `5`
 - 群聊随机预算：`0-1`，LLM 最多增加 `1`，硬上限 `2`

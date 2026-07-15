@@ -171,7 +171,7 @@
       "enable": {
         "description": "启用智能注入",
         "type": "bool",
-        "hint": "普通聊天按关键词注入必要状态，不额外调用 LLM。",
+        "hint": "按下方配置的关键词注入状态，不额外调用 LLM。",
         "default": true
       },
       "base_module_enable": {
@@ -195,7 +195,7 @@
       "outfit_keywords": {
         "description": "穿搭关键词",
         "type": "list",
-        "hint": "命中后注入外显穿搭；保存后完整替换默认列表。",
+        "hint": "命中后注入外显穿搭；为空时不触发此模块。",
         "default": [
           "穿什么",
           "穿搭",
@@ -209,7 +209,7 @@
       "underwear_keywords": {
         "description": "内衣关键词",
         "type": "list",
-        "hint": "命中后额外注入内衣和打底信息；保存后完整替换默认列表。",
+        "hint": "命中后注入内衣和打底信息；为空时不触发此模块。",
         "default": [
           "内衣",
           "打底",
@@ -220,7 +220,7 @@
       "schedule_keywords": {
         "description": "日程关键词",
         "type": "list",
-        "hint": "命中后注入主题、心情、当前时段和下一项；保存后完整替换默认列表。",
+        "hint": "命中后注入主题、心情、当前时段和下一项；为空时不触发此模块。",
         "default": [
           "在干嘛",
           "忙吗",
@@ -234,7 +234,7 @@
       "long_term_keywords": {
         "description": "大时间表关键词",
         "type": "list",
-        "hint": "命中后注入当前阶段、固定事件和里程碑；保存后完整替换默认列表。",
+        "hint": "命中后注入当前阶段、固定事件和里程碑；为空时不触发此模块。",
         "default": [
           "上课",
           "考试",
@@ -247,13 +247,20 @@
           "里程碑"
         ]
       },
-      "full_query_keywords": {
-        "description": "完整查询关键词",
+      "full_schedule_keywords": {
+        "description": "完整日程关键词",
         "type": "list",
-        "hint": "命中后提示模型调用完整查询 Tool；保存后完整替换默认列表。",
+        "hint": "命中后要求调用完整日程 Tool；为空时不触发。",
         "default": [
           "完整日程",
-          "全部日程",
+          "全部日程"
+        ]
+      },
+      "full_long_term_keywords": {
+        "description": "完整大时间表关键词",
+        "type": "list",
+        "hint": "命中后要求调用大时间表 Tool；为空时不触发。",
+        "default": [
           "完整大时间表",
           "全部阶段",
           "校历",

@@ -6,14 +6,6 @@ from typing import Any
 
 from .models import OUTFIT_CATEGORY_LABELS, DailyPlan, TimelineItem, minute_of_day
 
-DEFAULT_KEYWORDS = {
-    "outfit_keywords": ["穿什么", "穿搭", "衣服", "搭配", "发型", "妆容", "好看"],
-    "underwear_keywords": ["内衣", "打底", "贴身", "睡衣里面"],
-    "schedule_keywords": ["在干嘛", "忙吗", "有空", "几点", "之后", "安排", "日程"],
-    "long_term_keywords": ["上课", "考试", "作业", "项目", "工期", "截止", "会议", "社团", "里程碑"],
-    "full_query_keywords": ["完整日程", "全部日程", "完整大时间表", "全部阶段", "校历", "工期表"],
-}
-
 
 class SmartContextInjector:
     def __init__(self, settings: dict[str, Any] | None = None) -> None:
@@ -21,7 +13,7 @@ class SmartContextInjector:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.settings.get("enable", True))
+        return bool(self.settings.get("enable", False))
 
     def build(
         self,
@@ -44,7 +36,12 @@ class SmartContextInjector:
         if not current:
             return "", (), limit
         normalized_text = self._normalize(user_text)
-        matched = {key: self._matches(normalized_text, key) for key in DEFAULT_KEYWORDS}
+        outfit_matched = self._matches(normalized_text, self.settings.get("outfit_keywords"))
+        underwear_matched = self._matches(normalized_text, self.settings.get("underwear_keywords"))
+        schedule_matched = self._matches(normalized_text, self.settings.get("schedule_keywords"))
+        long_term_matched = self._matches(normalized_text, self.settings.get("long_term_keywords"))
+        full_schedule_matched = self._matches(normalized_text, self.settings.get("full_schedule_keywords"))
+        full_long_term_matched = self._matches(normalized_text, self.settings.get("full_long_term_keywords"))
         sections = []
         modules = []
 
@@ -52,25 +49,30 @@ class SmartContextInjector:
             sections.append(self._base_section(plan, now, current))
             modules.append("base")
 
-        if matched["full_query_keywords"]:
-            modules.append("full_query")
-            tool_name = "get_long_term_timeline" if self._is_long_term_request(normalized_text, matched) else "get_virtual_daily_schedule"
+        if full_schedule_matched:
+            modules.append("full_schedule_query")
             sections.append(
                 "用户明确请求完整信息：必须优先调用 "
-                f"{tool_name}，不要凭当前摘要补全未查询的数据。"
+                "get_virtual_daily_schedule，不要凭当前摘要补全未查询的数据。"
             )
-        if matched["schedule_keywords"]:
+        if full_long_term_matched:
+            modules.append("full_long_term_query")
+            sections.append(
+                "用户明确请求完整信息：必须优先调用 "
+                "get_long_term_timeline，不要凭当前摘要补全未查询的数据。"
+            )
+        if schedule_matched:
             modules.append("schedule")
             sections.append(self._schedule_section(plan, now, current))
-        if matched["long_term_keywords"]:
+        if long_term_matched:
             modules.append("long_term")
             sections.extend(self._long_term_sections(long_term, plan.persona_id, now.date()))
-        if matched["outfit_keywords"]:
+        if outfit_matched:
             modules.append("outfit")
-            if matched["underwear_keywords"]:
+            if underwear_matched:
                 modules.append("underwear")
-            sections.append(self._outfit_section(plan, include_underwear=matched["underwear_keywords"]))
-        elif matched["underwear_keywords"]:
+            sections.append(self._outfit_section(plan, include_underwear=underwear_matched))
+        elif underwear_matched:
             modules.append("underwear")
             sections.append(self._outfit_section(plan, include_underwear=True, underwear_only=True))
 
@@ -89,8 +91,7 @@ class SmartContextInjector:
         except (TypeError, ValueError):
             return 7
 
-    def _matches(self, normalized_text: str, key: str) -> bool:
-        values = self.settings.get(key, DEFAULT_KEYWORDS[key])
+    def _matches(self, normalized_text: str, values: Any) -> bool:
         if not isinstance(values, list):
             return False
         return any(
@@ -99,14 +100,6 @@ class SmartContextInjector:
             if (normalized_keyword := self._normalize(str(value)))
         )
 
-    @staticmethod
-    def _is_long_term_request(normalized_text: str, matched: dict[str, bool]) -> bool:
-        if matched["long_term_keywords"]:
-            return True
-        return any(
-            SmartContextInjector._normalize(value) in normalized_text
-            for value in ("大时间表", "校历", "工期表", "全部阶段")
-        )
     @staticmethod
     def _normalize(value: str) -> str:
         normalized = unicodedata.normalize("NFKC", value).casefold()
