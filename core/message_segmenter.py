@@ -8,7 +8,7 @@ from typing import Any
 
 from astrbot.api import logger
 
-DEFAULT_REGEX = r".*?[。？！~…]+|.+$"
+DEFAULT_REGEX = r".*?[。？！~…\n]+|.+$"
 DEFAULT_SPLIT_WORDS = ["。", "？", "！", "?", "!", "~", "…", r"\n"]
 DEFAULT_RANDOM_INTERVAL = (0.8, 2.0)
 DEFAULT_LOG_BASE = 2.6
@@ -25,18 +25,19 @@ class SegmentResult:
 
 class ProactiveMessageSegmenter:
     def __init__(self, settings: dict[str, Any]):
-        self.enabled = bool(settings.get("segment_reply", True))
-        self.threshold = self._positive_int(settings.get("segment_words_count_threshold"), 150)
-        mode = str(settings.get("segment_split_mode", "words")).strip().lower()
+        self.enabled = bool(settings.get("enable", True))
+        self.threshold = self._nonnegative_int(settings.get("words_count_threshold"), 150)
+        mode = str(settings.get("split_mode", "words")).strip().lower()
         self.mode = mode if mode in {"words", "regex"} else "words"
-        self.regex = self._compile_split_regex(str(settings.get("segment_regex", DEFAULT_REGEX)))
-        self.split_words = self._split_words(settings.get("segment_words", DEFAULT_SPLIT_WORDS))
+        self.regex = self._compile_split_regex(str(settings.get("regex", DEFAULT_REGEX)))
+        self.split_words = self._split_words(settings.get("split_words", DEFAULT_SPLIT_WORDS))
         self.words_pattern = self._compile_words_pattern(self.split_words)
-        self.cleanup_pattern = self._compile_cleanup_regex(str(settings.get("segment_content_cleanup_rule", "")))
-        interval_method = str(settings.get("segment_interval_method", "log")).strip().lower()
+        cleanup_rule = str(settings.get("content_cleanup_rule", "")) if settings.get("enable_content_cleanup", False) else ""
+        self.cleanup_pattern = self._compile_cleanup_regex(cleanup_rule)
+        interval_method = str(settings.get("interval_method", "log")).strip().lower()
         self.interval_method = interval_method if interval_method in {"random", "log"} else "log"
-        self.random_interval = self._random_interval(settings.get("segment_interval", "0.8,2.0"))
-        self.log_base = self._log_base(settings.get("segment_log_base", DEFAULT_LOG_BASE))
+        self.random_interval = self._random_interval(settings.get("interval", "0.8,2.0"))
+        self.log_base = self._log_base(settings.get("log_base", DEFAULT_LOG_BASE))
 
     def split(self, text: str) -> SegmentResult:
         source_length = len(text)
@@ -58,7 +59,11 @@ class ProactiveMessageSegmenter:
     def interval_for(self, segment: str) -> float:
         if self.interval_method == "random":
             return random.uniform(*self.random_interval)
-        minimum = math.log(len(segment) + 1, self.log_base)
+        if all(ord(character) < 128 for character in segment):
+            word_count = len(segment.split())
+        else:
+            word_count = len([character for character in segment if character.isalnum()])
+        minimum = math.log(word_count + 1, self.log_base)
         return random.uniform(minimum, minimum + 0.5)
 
     def _unchanged(self, text: str, source_length: int, reason: str) -> SegmentResult:
@@ -69,24 +74,28 @@ class ProactiveMessageSegmenter:
         for segment in segments:
             if self.cleanup_pattern is not None:
                 segment = self.cleanup_pattern.sub("", segment)
-            segment = segment.strip()
-            if segment:
+            if segment.strip():
                 result.append(segment)
         return result
 
     @staticmethod
-    def _positive_int(value: Any, default: int) -> int:
+    def _nonnegative_int(value: Any, default: int) -> int:
         try:
-            return max(1, int(value))
+            return max(0, int(value))
         except (TypeError, ValueError):
             return default
 
     @staticmethod
     def _split_words(value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return list(DEFAULT_SPLIT_WORDS)
+        if isinstance(value, str):
+            values = [value]
+        else:
+            try:
+                values = list(value)
+            except TypeError:
+                return []
         result = []
-        for item in value:
+        for item in values:
             word = str(item)
             if word == r"\n":
                 word = "\n"
@@ -123,7 +132,7 @@ class ProactiveMessageSegmenter:
     def _random_interval(value: Any) -> tuple[float, float]:
         try:
             parts = [float(item.strip()) for item in str(value).split(",")]
-            if len(parts) != 2 or min(parts) < 0:
+            if len(parts) != 2 or any(not math.isfinite(part) or part < 0 for part in parts):
                 raise ValueError
             return min(parts), max(parts)
         except (TypeError, ValueError):
@@ -134,7 +143,7 @@ class ProactiveMessageSegmenter:
     def _log_base(value: Any) -> float:
         try:
             base = float(value)
-            if base <= 1:
+            if not math.isfinite(base) or base <= 1:
                 raise ValueError
             return base
         except (TypeError, ValueError):

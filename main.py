@@ -49,8 +49,9 @@ class ProactiveVirtualDailyPlugin(Star):
         self.personas = PersonaResolver(context)
         self.plan_generator = DailyPlanGenerator(context, config)
         self.message_generator = ProactiveMessageGenerator(context, config)
+        delivery_settings = self.config.get("delivery_settings", {}) or {}
         self.message_segmenter = ProactiveMessageSegmenter(
-            self.config.get("delivery_settings", {}) or {},
+            delivery_settings.get("segmented_reply_settings", {}) or {},
         )
         self.long_term = LongTermTimelineStore(self.data_dir)
         self.smart_context_injector = SmartContextInjector(

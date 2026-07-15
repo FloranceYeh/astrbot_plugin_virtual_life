@@ -17,18 +17,26 @@ class MessageSegmenterTests(unittest.TestCase):
 
     def test_text_over_threshold_is_not_segmented(self):
         text = "第一句。第二句。"
-        segmenter = ProactiveMessageSegmenter({"segment_words_count_threshold": len(text) - 1})
+        segmenter = ProactiveMessageSegmenter({"words_count_threshold": len(text) - 1})
 
         result = segmenter.split(text)
 
         self.assertEqual(result.segments, [text])
         self.assertEqual(result.skipped_reason, "over threshold")
 
+    def test_zero_threshold_disables_segmentation_for_nonempty_text(self):
+        segmenter = ProactiveMessageSegmenter({"words_count_threshold": 0})
+
+        result = segmenter.split("一句。")
+
+        self.assertEqual(result.segments, ["一句。"])
+        self.assertEqual(result.skipped_reason, "over threshold")
+
     def test_regex_mode_supports_capture_groups(self):
         segmenter = ProactiveMessageSegmenter(
             {
-                "segment_split_mode": "regex",
-                "segment_regex": r"(.*?[。！])|(.+$)",
+                "split_mode": "regex",
+                "regex": r"(.*?[。！])|(.+$)",
             }
         )
 
@@ -37,21 +45,27 @@ class MessageSegmenterTests(unittest.TestCase):
     def test_invalid_regex_falls_back_and_invalid_cleanup_is_ignored(self):
         segmenter = ProactiveMessageSegmenter(
             {
-                "segment_split_mode": "regex",
-                "segment_regex": "(",
-                "segment_content_cleanup_rule": "[",
+                "split_mode": "regex",
+                "regex": "(",
+                "enable_content_cleanup": True,
+                "content_cleanup_rule": "[",
             }
         )
 
         self.assertEqual(segmenter.split("第一句。第二句！").segments, ["第一句。", "第二句！"])
 
     def test_cleanup_rule_removes_matching_content(self):
-        segmenter = ProactiveMessageSegmenter({"segment_content_cleanup_rule": "[。！]"})
+        segmenter = ProactiveMessageSegmenter(
+            {
+                "enable_content_cleanup": True,
+                "content_cleanup_rule": "[。！]",
+            }
+        )
 
         self.assertEqual(segmenter.split("第一句。第二句！").segments, ["第一句", "第二句"])
 
     def test_empty_words_list_keeps_original_text(self):
-        segmenter = ProactiveMessageSegmenter({"segment_words": []})
+        segmenter = ProactiveMessageSegmenter({"split_words": []})
 
         result = segmenter.split("第一句。第二句。")
 
@@ -62,8 +76,8 @@ class MessageSegmenterTests(unittest.TestCase):
     def test_random_interval_uses_configured_range(self, uniform):
         segmenter = ProactiveMessageSegmenter(
             {
-                "segment_interval_method": "random",
-                "segment_interval": "2.0,0.8",
+                "interval_method": "random",
+                "interval": "2.0,0.8",
             }
         )
 
@@ -72,10 +86,18 @@ class MessageSegmenterTests(unittest.TestCase):
 
     @patch("core.message_segmenter.random.uniform", return_value=3.0)
     def test_log_interval_uses_segment_length(self, uniform):
-        segmenter = ProactiveMessageSegmenter({"segment_log_base": 2.6})
+        segmenter = ProactiveMessageSegmenter({"log_base": 2.6})
 
         self.assertEqual(segmenter.interval_for("四个字符"), 3.0)
         minimum = math.log(5, 2.6)
+        uniform.assert_called_once_with(minimum, minimum + 0.5)
+
+    @patch("core.message_segmenter.random.uniform", return_value=2.0)
+    def test_log_interval_counts_ascii_words(self, uniform):
+        segmenter = ProactiveMessageSegmenter({"log_base": 2.6})
+
+        self.assertEqual(segmenter.interval_for("two words!"), 2.0)
+        minimum = math.log(3, 2.6)
         uniform.assert_called_once_with(minimum, minimum + 0.5)
 
 

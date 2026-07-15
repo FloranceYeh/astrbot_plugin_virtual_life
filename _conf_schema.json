@@ -404,76 +404,115 @@
         "hint": "日程主动窗口在计划时间前后随机偏移的分钟数，范围 0-60；用户委托回访不受影响。",
         "default": 15
       },
-      "segment_reply": {
-        "description": "启用分段发送",
-        "type": "bool",
-        "hint": "对不超过阈值的主动消息按关键词或正则表达式分段。",
-        "default": true
-      },
-      "segment_words_count_threshold": {
-        "description": "分段字符阈值",
-        "type": "int",
-        "hint": "原文超过此字符数时整条发送，不执行分段。",
-        "default": 150
-      },
-      "segment_split_mode": {
-        "description": "分段模式",
-        "type": "string",
-        "hint": "words 使用关键词，regex 使用正则表达式。",
-        "options": [
-          "words",
-          "regex"
-        ],
-        "default": "words"
-      },
-      "segment_words": {
-        "description": "分段关键词",
-        "type": "list",
-        "hint": "匹配普通文本并保留关键词；\\n 表示换行。",
-        "default": [
-          "。",
-          "？",
-          "！",
-          "?",
-          "!",
-          "~",
-          "…",
-          "\\n"
-        ]
-      },
-      "segment_regex": {
-        "description": "分段正则",
-        "type": "string",
-        "hint": "使用每次完整匹配作为一个消息段，无效时回退默认规则。",
-        "default": ".*?[。？！~…]+|.+$"
-      },
-      "segment_content_cleanup_rule": {
-        "description": "内容清理正则",
-        "type": "string",
-        "hint": "从每个分段中移除匹配内容，留空不清理。",
-        "default": ""
-      },
-      "segment_interval_method": {
-        "description": "分段间隔模式",
-        "type": "string",
-        "hint": "log 按段落长度计算，random 使用随机区间。",
-        "options": [
-          "log",
-          "random"
-        ],
-        "default": "log"
-      },
-      "segment_interval": {
-        "description": "随机间隔区间",
-        "type": "string",
-        "hint": "random 模式的最小和最大秒数，例如 0.8,2.0。",
-        "default": "0.8,2.0"
-      },
-      "segment_log_base": {
-        "description": "对数间隔基数",
-        "type": "float",
-        "hint": "log 模式计算等待时间使用的对数基数，必须大于 1。",
-        "default": 2.6
+      "segmented_reply_settings": {
+        "description": "🔪 主动消息分段",
+        "type": "object",
+        "items": {
+          "enable": {
+            "description": "启用分段",
+            "type": "bool",
+            "hint": "将不超过阈值的主动消息拆成多条发送。",
+            "default": true
+          },
+          "words_count_threshold": {
+            "description": "不分段字数阈值",
+            "type": "int",
+            "hint": "原文超过此值时整条发送。",
+            "slider": {
+              "min": 0,
+              "max": 1024,
+              "step": 2
+            },
+            "default": 150
+          },
+          "split_mode": {
+            "description": "分段模式",
+            "type": "string",
+            "options": [
+              "regex",
+              "words"
+            ],
+            "labels": [
+              "正则表达式",
+              "分段词列表"
+            ],
+            "default": "words"
+          },
+          "regex": {
+            "description": "分段正则表达式",
+            "type": "string",
+            "hint": "每次完整匹配作为一个消息段，无效时回退默认规则。",
+            "condition": {
+              "split_mode": "regex"
+            },
+            "default": ".*?[。？！~…\\n]+|.+$"
+          },
+          "split_words": {
+            "description": "分段词列表",
+            "type": "list",
+            "hint": "检测到任意普通文本关键词时分段，并保留关键词；\\n 表示换行。",
+            "condition": {
+              "split_mode": "words"
+            },
+            "default": [
+              "。",
+              "？",
+              "！",
+              "?",
+              "!",
+              "~",
+              "…",
+              "\\n"
+            ]
+          },
+          "enable_content_cleanup": {
+            "description": "启用内容清理",
+            "type": "bool",
+            "hint": "分段后使用正则表达式移除匹配内容。",
+            "default": false
+          },
+          "content_cleanup_rule": {
+            "description": "内容清理正则表达式",
+            "type": "string",
+            "hint": "例如 [\\n] 可移除分段中残留的换行。",
+            "condition": {
+              "enable_content_cleanup": true
+            },
+            "default": "[\\n]"
+          },
+          "interval_method": {
+            "description": "间隔计算方法",
+            "type": "string",
+            "hint": "random 使用随机区间；log 根据中英文字数计算。",
+            "options": [
+              "random",
+              "log"
+            ],
+            "labels": [
+              "随机",
+              "对数计算"
+            ],
+            "default": "log"
+          },
+          "interval": {
+            "description": "随机间隔（秒）",
+            "type": "string",
+            "hint": "格式为最小值,最大值，例如 0.8,2.0。",
+            "condition": {
+              "interval_method": "random"
+            },
+            "default": "0.8,2.0"
+          },
+          "log_base": {
+            "description": "对数底数",
+            "type": "string",
+            "hint": "必须大于 1。",
+            "condition": {
+              "interval_method": "log"
+            },
+            "default": "2.6"
+          }
+        }
       },
       "recent_chat_messages": {
         "description": "最近聊天条数",
