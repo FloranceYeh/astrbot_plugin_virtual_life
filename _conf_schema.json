@@ -49,6 +49,20 @@
       "image_font": {"description": "自定义字体名称，留空使用系统中文字体栈", "type": "string", "default": ""}
     }
   },
+  "smart_context_injection": {
+    "description": "🧠 智能虚拟状态注入",
+    "type": "object",
+    "items": {
+      "enable": {"description": "启用智能虚拟状态注入", "type": "bool", "default": true},
+      "max_chars": {"description": "单次注入最大字符数，范围 400-8000", "type": "int", "default": 1600},
+      "long_term_milestone_days": {"description": "大时间表模块显示未来多少天的里程碑，范围 0-90", "type": "int", "default": 7},
+      "outfit_keywords": {"description": "命中后注入外显穿搭的关键词，修改后完全替换默认列表", "type": "list", "default": ["穿什么", "穿搭", "衣服", "搭配", "发型", "妆容", "好看"]},
+      "underwear_keywords": {"description": "命中后额外注入内衣与打底信息的关键词", "type": "list", "default": ["内衣", "打底", "贴身", "睡衣里面"]},
+      "schedule_keywords": {"description": "命中后注入主题、心情和下一项日程的关键词", "type": "list", "default": ["在干嘛", "忙吗", "有空", "几点", "之后", "安排", "日程"]},
+      "long_term_keywords": {"description": "命中后注入当前阶段、固定事件和里程碑的关键词", "type": "list", "default": ["上课", "考试", "作业", "项目", "工期", "截止", "会议", "社团", "里程碑"]},
+      "full_query_keywords": {"description": "命中后要求模型优先调用完整查询 Tool 的关键词", "type": "list", "default": ["完整日程", "全部日程", "完整大时间表", "全部阶段", "校历", "工期表"]}
+    }
+  },
   "friend_settings": {
     "description": "👤 私聊主动消息",
     "type": "object",
@@ -105,6 +119,5 @@
       "misfire_grace_minutes": {"description": "重启后允许补发的延迟窗口", "type": "int", "default": 30},
       "max_pending_per_session": {"description": "每个会话最多待执行回访", "type": "int", "default": 10}
     }
-  },
-  "context_injection": {"description": "普通对话自动注入当前虚拟状态", "type": "bool", "default": true}
+  }
 }

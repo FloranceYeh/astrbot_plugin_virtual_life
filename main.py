@@ -16,6 +16,7 @@ from astrbot.core.agent.message import TextPart
 from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.provider.entities import ProviderRequest
 
+from .core.context_injection import SmartContextInjector
 from .core.generator import DailyPlanGenerator
 from .core.image_renderer import ScheduleImageRenderer
 from .core.long_term import LongTermTimelineStore, validate_stage_bundle
@@ -48,6 +49,9 @@ class ProactiveVirtualDailyPlugin(Star):
         self.plan_generator = DailyPlanGenerator(context, config)
         self.message_generator = ProactiveMessageGenerator(context, config)
         self.long_term = LongTermTimelineStore(self.data_dir)
+        self.smart_context_injector = SmartContextInjector(
+            self.config.get("smart_context_injection", {}) or {},
+        )
         self.image_renderer = ScheduleImageRenderer(
             self.data_dir,
             self.html_render,
@@ -563,7 +567,7 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @filter.on_llm_request()
     async def inject_virtual_state(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
-        if not self.config.get("context_injection", True):
+        if not self.smart_context_injector.enabled:
             return
         try:
             _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
@@ -571,22 +575,14 @@ class ProactiveVirtualDailyPlugin(Star):
             return
         if plan.status != "ok":
             return
-        now = self._now()
-        current = timeline_item_at(plan, now)
-        if not current:
-            return
-        injection = (
-            "<character_state>\n"
-            f"时间：{now.strftime('%Y-%m-%d %H:%M')}\n"
-            f"当前活动：{current.activity}\n"
-            f"地点：{current.location or '未说明'}\n"
-            f"状态：{current.state}，可打扰度：{current.availability}\n"
-            "普通回复必须与该状态保持一致；需要完整安排时调用 get_virtual_daily_schedule。\n"
-            "只有用户明确要求稍后提醒、到点联系或询问后续时，才可调用 schedule_proactive_followup。"
-            "若用户提前汇报了结果，应先查询任务并调用 cancel_proactive_followup。\n"
-            "</character_state>"
+        injection = self.smart_context_injector.build(
+            plan,
+            self._now(),
+            self.long_term,
+            event.get_message_str(),
         )
-        req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
+        if injection:
+            req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
 
     @filter.llm_tool(name="get_virtual_daily_schedule")
     async def get_virtual_daily_schedule(self, event: AstrMessageEvent) -> str:
@@ -594,6 +590,14 @@ class ProactiveVirtualDailyPlugin(Star):
         _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
         return "今日暂无可用日程。" if plan.status != "ok" else format_plan(plan, self._now())
 
+    @filter.llm_tool(name="get_long_term_timeline")
+    async def get_long_term_timeline(self, event: AstrMessageEvent) -> str:
+        """查询机器人当前人格全部已批准的大时间表阶段。"""
+        persona = await self.personas.resolve(event.unified_msg_origin)
+        stages = self.long_term.list_for_persona(persona.id)
+        if not stages:
+            return "当前人格没有已批准的大时间表。"
+        return json.dumps({"persona_id": persona.id, "stages": stages}, ensure_ascii=False, indent=2)
     @filter.llm_tool(name="schedule_proactive_followup")
     async def schedule_proactive_followup(self, event: AstrMessageEvent, scheduled_at: str, intent: str) -> str:
         """仅在用户明确要求稍后联系、提醒或询问结果时创建一次回访。scheduled_at 必须是明确的 ISO 8601 时间；时间不明确时先询问用户。"""
