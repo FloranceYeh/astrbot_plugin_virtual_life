@@ -407,20 +407,73 @@
       "segment_reply": {
         "description": "启用分段发送",
         "type": "bool",
-        "hint": "过长的主动消息按字符数拆分发送。",
+        "hint": "对不超过阈值的主动消息按关键词或正则表达式分段。",
         "default": true
       },
-      "segment_max_chars": {
-        "description": "分段字符上限",
+      "segment_words_count_threshold": {
+        "description": "分段字符阈值",
         "type": "int",
-        "hint": "启用分段后，每段最多包含的字符数。",
-        "default": 80
+        "hint": "原文超过此字符数时整条发送，不执行分段。",
+        "default": 150
       },
-      "segment_interval_seconds": {
-        "description": "分段发送间隔",
+      "segment_split_mode": {
+        "description": "分段模式",
+        "type": "string",
+        "hint": "words 使用关键词，regex 使用正则表达式。",
+        "options": [
+          "words",
+          "regex"
+        ],
+        "default": "words"
+      },
+      "segment_words": {
+        "description": "分段关键词",
+        "type": "list",
+        "hint": "匹配普通文本并保留关键词；\\n 表示换行。",
+        "default": [
+          "。",
+          "？",
+          "！",
+          "?",
+          "!",
+          "~",
+          "…",
+          "\\n"
+        ]
+      },
+      "segment_regex": {
+        "description": "分段正则",
+        "type": "string",
+        "hint": "使用每次完整匹配作为一个消息段，无效时回退默认规则。",
+        "default": ".*?[。？！~…]+|.+$"
+      },
+      "segment_content_cleanup_rule": {
+        "description": "内容清理正则",
+        "type": "string",
+        "hint": "从每个分段中移除匹配内容，留空不清理。",
+        "default": ""
+      },
+      "segment_interval_method": {
+        "description": "分段间隔模式",
+        "type": "string",
+        "hint": "log 按段落长度计算，random 使用随机区间。",
+        "options": [
+          "log",
+          "random"
+        ],
+        "default": "log"
+      },
+      "segment_interval": {
+        "description": "随机间隔区间",
+        "type": "string",
+        "hint": "random 模式的最小和最大秒数，例如 0.8,2.0。",
+        "default": "0.8,2.0"
+      },
+      "segment_log_base": {
+        "description": "对数间隔基数",
         "type": "float",
-        "hint": "分段消息之间的等待时间，单位为秒。",
-        "default": 1.2
+        "hint": "log 模式计算等待时间使用的对数基数，必须大于 1。",
+        "default": 2.6
       },
       "recent_chat_messages": {
         "description": "最近聊天条数",

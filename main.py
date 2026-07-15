@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import random
-import re
 import uuid
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -21,6 +20,7 @@ from .core.generator import DailyPlanGenerator
 from .core.image_renderer import ScheduleImageRenderer
 from .core.long_term import LongTermTimelineStore, validate_stage_bundle
 from .core.message_generator import ProactiveMessageGenerator
+from .core.message_segmenter import ProactiveMessageSegmenter
 from .core.models import DailyPlan, FollowupTask, ProactiveWindow
 from .core.persona import PersonaContext, PersonaResolver
 from .core.proactive import ProactivePolicy, session_kind
@@ -49,6 +49,9 @@ class ProactiveVirtualDailyPlugin(Star):
         self.personas = PersonaResolver(context)
         self.plan_generator = DailyPlanGenerator(context, config)
         self.message_generator = ProactiveMessageGenerator(context, config)
+        self.message_segmenter = ProactiveMessageSegmenter(
+            self.config.get("delivery_settings", {}) or {},
+        )
         self.long_term = LongTermTimelineStore(self.data_dir)
         self.smart_context_injector = SmartContextInjector(
             self.config.get("smart_context_injection", {}) or {},
@@ -323,34 +326,22 @@ class ProactiveVirtualDailyPlugin(Star):
         await self._send_text(umo, text)
 
     async def _send_text(self, umo: str, text: str) -> None:
-        settings = self.config.get("delivery_settings", {}) or {}
-        segments = self._split_text(text, int(settings.get("segment_max_chars", 80))) if settings.get("segment_reply", True) else [text]
-        interval = max(0.0, float(settings.get("segment_interval_seconds", 1.2)))
-        for index, segment in enumerate(segments):
+        result = self.message_segmenter.split(text)
+        logger.info(
+            "[虚拟人生] 主动消息分段 umo=%s mode=%s chars=%s parts=%s threshold=%s reason=%s",
+            umo,
+            result.mode,
+            result.source_length,
+            len(result.segments),
+            result.threshold,
+            result.skipped_reason or "segmented",
+        )
+        for index, segment in enumerate(result.segments):
             sent = await self.context.send_message(umo, MessageChain().message(segment))
             if not sent:
                 raise RuntimeError(f"platform unavailable for {umo}")
-            if index + 1 < len(segments) and interval:
-                await asyncio.sleep(interval)
-
-    @staticmethod
-    def _split_text(text: str, maximum: int) -> list[str]:
-        maximum = max(20, maximum)
-        pieces = [piece.strip() for piece in re.split(r"(?<=[。！？!?\n])", text) if piece.strip()]
-        result: list[str] = []
-        buffer = ""
-        for piece in pieces or [text.strip()]:
-            if buffer and len(buffer) + len(piece) > maximum:
-                result.append(buffer)
-                buffer = piece
-            else:
-                buffer += piece
-            while len(buffer) > maximum:
-                result.append(buffer[:maximum])
-                buffer = buffer[maximum:]
-        if buffer:
-            result.append(buffer)
-        return result or [text]
+            if index + 1 < len(result.segments):
+                await asyncio.sleep(self.message_segmenter.interval_for(segment))
 
     async def _restore_followups(self) -> None:
         now = self._now()
