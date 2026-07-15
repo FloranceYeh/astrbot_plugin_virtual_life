@@ -282,7 +282,7 @@
       "session_list": {
         "description": "私聊白名单",
         "type": "list",
-        "hint": "可使用 /sid 获取 UMO；仅列表内会调度主动消息。",
+        "hint": "可使用 /虚拟人生 订阅会话自动添加当前 UMO；仅列表内会调度主动消息。",
         "default": []
       },
       "idle_min_minutes": {
@@ -342,7 +342,7 @@
       "session_list": {
         "description": "群聊白名单",
         "type": "list",
-        "hint": "可使用 /sid 获取 UMO；仅列表内会调度主动消息。",
+        "hint": "可使用 /虚拟人生 订阅会话自动添加当前 UMO；仅列表内会调度主动消息。",
         "default": []
       },
       "idle_min_minutes": {

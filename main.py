@@ -898,7 +898,3 @@ class ProactiveVirtualDailyPlugin(Star):
     @filter.command("取消回访")
     async def followup_cancel_command(self, event: AstrMessageEvent, task_id: str):
         yield event.plain_result(await self.cancel_proactive_followup(event, task_id))
-
-    @filter.command("sid")
-    async def show_sid(self, event: AstrMessageEvent):
-        yield event.plain_result(event.unified_msg_origin)

@@ -19,6 +19,7 @@ class CommandGroupContractTests(unittest.TestCase):
         self.assertIn('@filter.command_group("虚拟人生")', self.source)
         self.assertIn('@virtual_life_group.command("订阅会话")', self.source)
         self.assertIn("self.config.save_config()", self.source)
+        self.assertNotIn('@filter.command("sid")', self.source)
 
     def test_long_term_commands_share_group(self):
         self.assertIn('@filter.command_group("大时间表")', self.source)
