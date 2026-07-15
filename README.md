@@ -1,6 +1,12 @@
-# 虚拟人生（Virtual Life）
+<p align="center">
+  <img src="logo.png" alt="Virtual Life Logo" width="180" />
+</p>
 
-一个独立的 AstrBot 插件：按当前生效人格维护校历、项目工期等长期阶段，生成结构化每日虚拟日程，并根据日程状态、会话沉默和用户明确委托主动发送消息。
+<h1 align="center">虚拟人生（Virtual Life）</h1>
+
+<p align="center">为机器人维护连续的虚拟人生：长期时间表、每日日程、穿搭、当前状态与主动消息。</p>
+
+<p align="center"><strong>已上架 AstrBot 插件市场</strong></p>
 
 ## 功能
 
@@ -21,7 +27,30 @@
 
 ## 安装
 
-将插件目录命名为 `astrbot_plugin_virtual_life` 后放入 AstrBot 的 `data/plugins`，安装 `requirements.txt` 并重载插件。
+### AstrBot 插件市场（推荐）
+
+1. 打开 AstrBot 管理面板，进入插件市场。
+2. 搜索“虚拟人生”。
+3. 点击安装，完成后重载插件。
+4. 在插件配置中选择日程模型，并按需配置主动消息会话白名单。
+
+<details>
+<summary><strong>手动安装（备用）</strong></summary>
+
+可选择以下任一方式：
+
+1. **控制面板安装**：在 AstrBot 插件管理页面选择通过仓库链接安装，输入 `https://github.com/FloranceYeh/astrbot_plugin_virtual_life`。
+2. **Git 克隆**：在 AstrBot 的 `data/plugins` 目录执行：
+
+   ```bash
+   git clone https://github.com/FloranceYeh/astrbot_plugin_virtual_life.git
+   ```
+
+3. **下载插件**：下载仓库 ZIP 并解压到 `data/plugins/astrbot_plugin_virtual_life`。
+
+完成后安装 `requirements.txt` 中的依赖，然后重载插件或重启 AstrBot。
+
+</details>
 
 ## 配置
 
