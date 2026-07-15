@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from .holiday_calendar import ChinaHolidayCalendar
 from .models import minute_of_day
 from .storage import JsonRepository
 
@@ -161,6 +162,7 @@ def _overlap(left: dict[str, Any], right: dict[str, Any]) -> bool:
 class LongTermTimelineStore:
     def __init__(self, data_dir: Path):
         self.repo = JsonRepository(data_dir / "long_term_timelines.json", {"schema_version": 1, "stages": []})
+        self.holidays = ChinaHolidayCalendar()
         self.stages: list[dict[str, Any]] = []
         self.drafts: dict[str, dict[str, Any]] = {}
         self.notification_targets: dict[str, str] = {}
@@ -364,7 +366,13 @@ class LongTermTimelineStore:
             "active_periods": active_periods,
             "constraints": list(dict.fromkeys(constraints)),
             "milestones": milestones,
+            "holidays": self.holidays.on(target),
         }
+
+    def with_holidays(self, stage: dict[str, Any]) -> dict[str, Any]:
+        start = date.fromisoformat(stage["start_date"])
+        end = date.fromisoformat(stage["end_date"])
+        return {**stage, "holidays": self.holidays.between(start, end)}
 
     def format_day_context(self, persona_id: str, target: date, *, fallback_to_latest: bool = False) -> str:
         expanded = self.expand_day(persona_id, target)
@@ -382,10 +390,15 @@ class LongTermTimelineStore:
                 )
             return "长期时间表：当前日期没有生效阶段。"
         stage = expanded["stage"]
+        today_holidays = "、".join(item["name"] for item in expanded["holidays"]) or "无"
+        upcoming_holidays = self.holidays.upcoming(target, 7)
+        upcoming_text = "；".join(f"{item['date']} {item['name']}" for item in upcoming_holidays) or "无"
         lines = [
             "<long_term_timeline>",
             f"阶段：{stage['name']}（{stage['kind']}，{stage['start_date']} 至 {stage['end_date']}）",
             f"说明：{stage.get('summary') or '无'}",
+            f"今日节日：{today_holidays}",
+            f"未来 7 天节日：{upcoming_text}",
             "今日必须保留的固定事件：",
         ]
         lines.extend(

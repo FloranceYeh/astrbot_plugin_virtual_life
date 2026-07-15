@@ -54,6 +54,16 @@ class LongTermTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([item["title"] for item in expanded["fixed_events"]], ["开学典礼"])
             self.assertEqual([item["title"] for item in expanded["milestones"]], ["提交选课确认"])
 
+    async def test_holidays_are_added_to_stage_and_daily_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = LongTermTimelineStore(Path(directory))
+            stage = validate_stage(academic_stage(), "student")
+            store.stages = [stage]
+            enriched = store.with_holidays(stage)
+            self.assertIn("中秋节", {item["name"] for item in enriched["holidays"]})
+            context = store.format_day_context("student", date(2026, 9, 25))
+            self.assertIn("今日节日：中秋节", context)
+
     async def test_persona_isolation_and_priority(self):
         with tempfile.TemporaryDirectory() as directory:
             store = LongTermTimelineStore(Path(directory))

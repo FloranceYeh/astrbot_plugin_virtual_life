@@ -50,6 +50,7 @@ def stage():
         "summary": "正常上课",
         "weekly_rules": [{"weekdays": [2], "start": "18:00", "end": "20:00", "title": "社团例会", "location": "活动室", "participants": ["社员"], "required": True}],
         "special_dates": [],
+        "holidays": [{"date": "2026-09-25", "name": "中秋节", "kind": "traditional"}],
         "special_periods": [],
         "milestones": [],
         "constraints": [],
@@ -80,6 +81,7 @@ class ImageRendererTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first, second)
             self.assertEqual(len(backend.calls), 1)
             self.assertEqual(backend.calls[0][1]["stage"]["weekly_rules"][0]["weekday_text"], "周二")
+            self.assertEqual(backend.calls[0][1]["stage"]["holidays"][0]["name"], "中秋节")
 
     async def test_stage_list_builds_relative_timeline(self):
         with tempfile.TemporaryDirectory() as directory:

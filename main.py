@@ -36,6 +36,7 @@ from .core.utils import (
     prune_date_keys,
     timeline_item_at,
 )
+from .core.window_schedule import proactive_window_offset_minutes
 
 
 class ProactiveVirtualDailyPlugin(Star):
@@ -162,10 +163,14 @@ class ProactiveVirtualDailyPlugin(Star):
         now = self._now()
         state = self.policy.ensure_state(umo, persona.id, plan, now)
         if plan.status == "ok":
+            delivery = self.config.get("delivery_settings", {}) or {}
+            jitter_minutes = delivery.get("proactive_window_jitter_minutes", 15)
             for window in plan.proactive_windows:
                 if not self._window_matches(umo, window):
                     continue
-                run_at = self._at_time(plan.date, window.at)
+                run_at = self._at_time(plan.date, window.at) + timedelta(
+                    minutes=proactive_window_offset_minutes(plan, window, jitter_minutes),
+                )
                 if run_at <= now:
                     continue
                 self.runtime.add_date_job(
@@ -604,7 +609,9 @@ class ProactiveVirtualDailyPlugin(Star):
         stages = self.long_term.list_for_persona(persona.id)
         if not stages:
             return "当前人格没有已批准的大时间表。"
-        return json.dumps({"persona_id": persona.id, "stages": stages}, ensure_ascii=False, indent=2)
+        enriched = [self.long_term.with_holidays(stage) for stage in stages]
+        return json.dumps({"persona_id": persona.id, "stages": enriched}, ensure_ascii=False, indent=2)
+
     @filter.llm_tool(name="schedule_proactive_followup")
     async def schedule_proactive_followup(self, event: AstrMessageEvent, scheduled_at: str, intent: str) -> str:
         """仅在用户明确要求稍后联系、提醒或询问结果时创建一次回访。scheduled_at 必须是明确的 ISO 8601 时间；时间不明确时先询问用户。"""
@@ -717,7 +724,8 @@ class ProactiveVirtualDailyPlugin(Star):
         if not draft:
             yield event.plain_result("当前人格没有待批准草稿。")
             return
-        fallback = json.dumps(draft, ensure_ascii=False, indent=2)
+        stages = [self.long_term.with_holidays(stage) for stage in draft["stages"]]
+        fallback = json.dumps({**draft, "stages": stages}, ensure_ascii=False, indent=2)
         jobs = [
             lambda stage=stage: self.image_renderer.render_stage(
                 stage,
@@ -725,7 +733,7 @@ class ProactiveVirtualDailyPlugin(Star):
                 status="draft",
                 draft_metadata=draft,
             )
-            for stage in draft["stages"]
+            for stage in stages
         ]
         results = await self._image_view_results(
             event,
@@ -817,6 +825,7 @@ class ProactiveVirtualDailyPlugin(Star):
             else:
                 yield event.plain_result("当前人格没有已批准的大时间表。")
             return
+        stage = self.long_term.with_holidays(stage)
         fallback = json.dumps(stage, ensure_ascii=False, indent=2)
         results = await self._image_view_results(
             event,

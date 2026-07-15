@@ -398,6 +398,12 @@
         "hint": "日程窗口触发前要求的最短会话空闲时间，单位为分钟。",
         "default": 20
       },
+      "proactive_window_jitter_minutes": {
+        "description": "主动窗口随机偏移",
+        "type": "int",
+        "hint": "日程主动窗口在计划时间前后随机偏移的分钟数，范围 0-60；用户委托回访不受影响。",
+        "default": 15
+      },
       "segment_reply": {
         "description": "启用分段发送",
         "type": "bool",
