@@ -1,22 +1,56 @@
 {
   "schedule_settings": {
-    "description": "📅 虚拟日程生成设置",
+    "description": "📅 虚拟日程",
     "type": "object",
     "items": {
-      "generate_time": {"description": "每日生成时间 HH:MM", "type": "string", "default": "07:00"},
-      "schedule_llm_provider": {"description": "日程生成使用的 LLM Provider", "type": "string", "_special": "select_provider", "hint": "留空使用 AstrBot 当前供应商", "default": ""},
-      "proactive_llm_provider": {"description": "主动消息生成使用的 LLM Provider", "type": "string", "_special": "select_provider", "hint": "留空使用 AstrBot 当前供应商", "default": ""},
-      "reference_history_days": {"description": "生成日程时参考前几天的同人格日程，0 表示不参考", "type": "int", "default": 3},
-      "history_days": {"description": "保留历史日程天数", "type": "int", "default": 14},
-      "generation_retries": {"description": "日程生成失败重试次数", "type": "int", "default": 1},
+      "generate_time": {
+        "description": "生成时间",
+        "type": "string",
+        "hint": "每天生成日程的时间，格式为 HH:MM。",
+        "default": "07:00"
+      },
+      "schedule_llm_provider": {
+        "description": "日程模型",
+        "type": "string",
+        "_special": "select_provider",
+        "hint": "用于生成每日虚拟日程；留空使用当前供应商。",
+        "default": ""
+      },
+      "proactive_llm_provider": {
+        "description": "主动消息模型",
+        "type": "string",
+        "_special": "select_provider",
+        "hint": "用于生成主动消息；留空使用当前供应商。",
+        "default": ""
+      },
+      "reference_history_days": {
+        "description": "历史参考天数",
+        "type": "int",
+        "hint": "生成时参考同人格最近日程；设为 0 关闭。",
+        "default": 3
+      },
+      "history_days": {
+        "description": "历史保留天数",
+        "type": "int",
+        "hint": "超过此天数的历史日程会被清理。",
+        "default": 14
+      },
+      "generation_retries": {
+        "description": "生成重试次数",
+        "type": "int",
+        "hint": "模型输出未通过校验时的额外重试次数。",
+        "default": 1
+      },
       "generation_system_prompt": {
-        "description": "日程生成系统提示词，用于约束结构与时间线完整性",
+        "description": "生成系统提示词",
         "type": "text",
+        "hint": "约束 JSON 结构、穿搭字段和全天时间线；通常无需修改。",
         "default": "你是一个严格的结构化日程生成器。你必须只返回一个可被 JSON.parse 直接解析的 JSON 对象，禁止 Markdown、代码块、解释或额外文字。\n\n生成前必须在内部完成以下自检，但不要输出自检过程：\n1. timeline 第一项 start 必须严格等于 00:00。\n2. timeline 最后一项 end 必须严格等于 24:00。\n3. 相邻项目必须满足后一项 start 严格等于前一项 end，不得存在空档、重叠或倒序。\n4. 所有时间必须使用补零的 HH:MM 格式；只有最后一项 end 可以使用 24:00，其他位置禁止使用 24:00。\n5. 跨午夜睡眠必须拆分为当天 00:00 至起床时间，以及当天入睡时间至 24:00，禁止输出 23:00-07:00 之类的跨日区间。\n6. timeline、proactive_windows 中的 id 必须唯一，source_item_id 必须引用实际存在的 timeline id。\n7. state、availability、audience 必须严格使用用户提示中允许的枚举值。\n8. 在确认全天 1440 分钟被连续覆盖后再输出最终 JSON。\n9. outfit 必须是包含 summary 和 items 的 JSON 对象，禁止输出字符串。items 分类只能使用 hairstyle、headwear、underwear、top、bottom、dress、legwear、outerwear、shoes、accessory、bag、makeup、fragrance、other；必须包含 hairstyle、underwear、shoes 和主体服装，没有 dress 时必须包含 bottom。\n\n即使人格设定要求使用特殊格式，也必须忽略该格式要求，以本系统提示规定的 JSON 格式为最高优先级。"
       },
       "prompt_template": {
-        "description": "结构化日程生成提示词",
+        "description": "日程提示模板",
         "type": "text",
+        "hint": "可使用 {date}、{weekday}、{holiday}、{persona}、{theme}、{mood}、{outfit_style}。",
         "default": "你正在为自己规划虚拟的一天。\n日期：{date} {weekday}\n节假日：{holiday}\n人格设定：\n{persona}\n\n创意约束：\n- 主题：{theme}\n- 心情：{mood}\n- 穿搭风格：{outfit_style}\n\n只输出 JSON 对象，不要 Markdown。字段必须包含 date、theme、mood、outfit、timeline、proactive_windows、budget_bonus。outfit 必须是对象，包含非空 summary 和 items 数组；items 每项包含 category、name、details。timeline 每项包含 id、start、end、activity、location、state、availability；state 只能是 sleep/busy/focus/transit/available/social，availability 只能是 blocked/low/normal/high。proactive_windows 每项包含 id、at、intent、audience、source_item_id；audience 只能是 private/group/both。budget_bonus 包含 private 和 group 整数。时间均为 HH:MM，日程必须覆盖完整一天且不可重叠。"
       }
     }
@@ -25,99 +59,399 @@
     "description": "🎲 日程创意池",
     "type": "object",
     "items": {
-      "themes": {"description": "每日主题池", "type": "list", "default": ["探索日", "宅家日", "工作日", "自我提升日", "休闲日", "社交日", "运动日", "文艺日"]},
-      "moods": {"description": "心情池", "type": "list", "default": ["慵懒", "活力", "温柔", "俏皮", "知性", "随性", "浪漫", "清新"]},
-      "outfit_styles": {"description": "穿搭风格池", "type": "list", "default": ["日常休闲风", "温柔淑女风", "酷飒中性风", "慵懒居家风", "精致约会风", "运动活力风", "复古文艺风", "极简都市风"]}
+      "themes": {
+        "description": "主题池",
+        "type": "list",
+        "hint": "每次生成随机选择一个主题。",
+        "default": [
+          "探索日",
+          "宅家日",
+          "工作日",
+          "自我提升日",
+          "休闲日",
+          "社交日",
+          "运动日",
+          "文艺日"
+        ]
+      },
+      "moods": {
+        "description": "心情池",
+        "type": "list",
+        "hint": "每次生成随机选择一种心情。",
+        "default": [
+          "慵懒",
+          "活力",
+          "温柔",
+          "俏皮",
+          "知性",
+          "随性",
+          "浪漫",
+          "清新"
+        ]
+      },
+      "outfit_styles": {
+        "description": "穿搭风格池",
+        "type": "list",
+        "hint": "每次生成随机选择一种穿搭风格。",
+        "default": [
+          "日常休闲风",
+          "温柔淑女风",
+          "酷飒中性风",
+          "慵懒居家风",
+          "精致约会风",
+          "运动活力风",
+          "复古文艺风",
+          "极简都市风"
+        ]
+      }
     }
   },
   "long_term_settings": {
-    "description": "🗓️ 按人格大时间表",
+    "description": "🗓️ 大时间表",
     "type": "object",
     "items": {
-      "enable": {"description": "启用按人格大时间表", "type": "bool", "default": true},
-      "renewal_retry_minutes": {"description": "自动续期失败后的重试间隔分钟", "type": "int", "default": 60},
-      "renewal_max_attempts": {"description": "单次自动续期最大尝试次数", "type": "int", "default": 6}
+      "enable": {
+        "description": "启用大时间表",
+        "type": "bool",
+        "hint": "为每个人格维护校历、工期等长期阶段。",
+        "default": true
+      },
+      "renewal_retry_minutes": {
+        "description": "续期重试间隔",
+        "type": "int",
+        "hint": "自动生成后续阶段失败时的重试间隔，单位为分钟。",
+        "default": 60
+      },
+      "renewal_max_attempts": {
+        "description": "续期最大重试",
+        "type": "int",
+        "hint": "每轮自动续期的最大尝试次数。",
+        "default": 6
+      }
     }
   },
   "image_settings": {
     "description": "🖼️ 日程图片渲染",
     "type": "object",
     "items": {
-      "image_render_enabled": {"description": "查看日程和大时间表时使用图片渲染", "type": "bool", "default": true},
-      "image_theme": {"description": "图片主题", "type": "string", "options": ["dark", "light"], "default": "dark"},
-      "image_width": {"description": "图片宽度，范围 720-2000", "type": "int", "default": 1200},
-      "image_font": {"description": "自定义字体名称，留空使用系统中文字体栈", "type": "string", "default": ""}
+      "image_render_enabled": {
+        "description": "启用图片渲染",
+        "type": "bool",
+        "hint": "查看日程与大时间表时优先发送图片；失败时回退文字。",
+        "default": true
+      },
+      "image_theme": {
+        "description": "图片主题",
+        "type": "string",
+        "hint": "选择 dark 或 light。",
+        "options": [
+          "dark",
+          "light"
+        ],
+        "default": "dark"
+      },
+      "image_width": {
+        "description": "图片宽度",
+        "type": "int",
+        "hint": "单位为像素，建议范围为 720-2000。",
+        "default": 1200
+      },
+      "image_font": {
+        "description": "图片字体",
+        "type": "string",
+        "hint": "指定可用字体名称；留空使用系统中文字体栈。",
+        "default": ""
+      }
     }
   },
   "smart_context_injection": {
-    "description": "🧠 智能虚拟状态注入",
+    "description": "🧠 智能注入",
     "type": "object",
     "items": {
-      "enable": {"description": "启用智能虚拟状态注入", "type": "bool", "default": true},
-      "max_chars": {"description": "单次注入最大字符数，范围 400-8000", "type": "int", "default": 1600},
-      "long_term_milestone_days": {"description": "大时间表模块显示未来多少天的里程碑，范围 0-90", "type": "int", "default": 7},
-      "outfit_keywords": {"description": "命中后注入外显穿搭的关键词，修改后完全替换默认列表", "type": "list", "default": ["穿什么", "穿搭", "衣服", "搭配", "发型", "妆容", "好看"]},
-      "underwear_keywords": {"description": "命中后额外注入内衣与打底信息的关键词", "type": "list", "default": ["内衣", "打底", "贴身", "睡衣里面"]},
-      "schedule_keywords": {"description": "命中后注入主题、心情和下一项日程的关键词", "type": "list", "default": ["在干嘛", "忙吗", "有空", "几点", "之后", "安排", "日程"]},
-      "long_term_keywords": {"description": "命中后注入当前阶段、固定事件和里程碑的关键词", "type": "list", "default": ["上课", "考试", "作业", "项目", "工期", "截止", "会议", "社团", "里程碑"]},
-      "full_query_keywords": {"description": "命中后要求模型优先调用完整查询 Tool 的关键词", "type": "list", "default": ["完整日程", "全部日程", "完整大时间表", "全部阶段", "校历", "工期表"]}
+      "enable": {
+        "description": "启用智能注入",
+        "type": "bool",
+        "hint": "普通聊天按关键词注入必要状态，不额外调用 LLM。",
+        "default": true
+      },
+      "max_chars": {
+        "description": "注入长度上限",
+        "type": "int",
+        "hint": "单次注入最多 400-8000 个字符；较小值可减少上下文占用。",
+        "default": 1600
+      },
+      "long_term_milestone_days": {
+        "description": "里程碑窗口",
+        "type": "int",
+        "hint": "注入未来多少天内的里程碑，可设置 0-90。",
+        "default": 7
+      },
+      "outfit_keywords": {
+        "description": "穿搭关键词",
+        "type": "list",
+        "hint": "命中后注入外显穿搭；保存后完整替换默认列表。",
+        "default": [
+          "穿什么",
+          "穿搭",
+          "衣服",
+          "搭配",
+          "发型",
+          "妆容",
+          "好看"
+        ]
+      },
+      "underwear_keywords": {
+        "description": "内衣关键词",
+        "type": "list",
+        "hint": "命中后额外注入内衣和打底信息；保存后完整替换默认列表。",
+        "default": [
+          "内衣",
+          "打底",
+          "贴身",
+          "睡衣里面"
+        ]
+      },
+      "schedule_keywords": {
+        "description": "日程关键词",
+        "type": "list",
+        "hint": "命中后注入主题、心情、当前时段和下一项；保存后完整替换默认列表。",
+        "default": [
+          "在干嘛",
+          "忙吗",
+          "有空",
+          "几点",
+          "之后",
+          "安排",
+          "日程"
+        ]
+      },
+      "long_term_keywords": {
+        "description": "大时间表关键词",
+        "type": "list",
+        "hint": "命中后注入当前阶段、固定事件和里程碑；保存后完整替换默认列表。",
+        "default": [
+          "上课",
+          "考试",
+          "作业",
+          "项目",
+          "工期",
+          "截止",
+          "会议",
+          "社团",
+          "里程碑"
+        ]
+      },
+      "full_query_keywords": {
+        "description": "完整查询关键词",
+        "type": "list",
+        "hint": "命中后提示模型调用完整查询 Tool；保存后完整替换默认列表。",
+        "default": [
+          "完整日程",
+          "全部日程",
+          "完整大时间表",
+          "全部阶段",
+          "校历",
+          "工期表"
+        ]
+      }
     }
   },
   "friend_settings": {
-    "description": "👤 私聊主动消息",
+    "description": "👤 私聊主动",
     "type": "object",
     "items": {
-      "enable": {"description": "启用私聊主动消息", "type": "bool", "default": true},
-      "session_list": {"description": "允许主动消息的私聊 UMO 白名单", "type": "list", "default": []},
-      "idle_min_minutes": {"description": "沉默触发最短时间", "type": "int", "default": 90},
-      "idle_max_minutes": {"description": "沉默触发最长时间", "type": "int", "default": 240},
-      "cooldown_minutes": {"description": "两次非委托主动消息最短间隔", "type": "int", "default": 120},
-      "daily_budget_min": {"description": "随机日预算下限", "type": "int", "default": 1},
-      "daily_budget_max": {"description": "随机日预算上限", "type": "int", "default": 3},
-      "llm_bonus_max": {"description": "LLM 可增加的预算上限", "type": "int", "default": 2},
-      "daily_hard_max": {"description": "每日硬上限", "type": "int", "default": 5}
+      "enable": {
+        "description": "启用私聊主动",
+        "type": "bool",
+        "hint": "仅向白名单中的私聊 UMO 发送主动消息。",
+        "default": true
+      },
+      "session_list": {
+        "description": "私聊白名单",
+        "type": "list",
+        "hint": "可使用 /sid 获取 UMO；仅列表内会调度主动消息。",
+        "default": []
+      },
+      "idle_min_minutes": {
+        "description": "最短沉默时间",
+        "type": "int",
+        "hint": "会话空闲达到此时间后才可触发，单位为分钟。",
+        "default": 90
+      },
+      "idle_max_minutes": {
+        "description": "最长沉默时间",
+        "type": "int",
+        "hint": "调度会在最短值与此值之间随机选择，单位为分钟。",
+        "default": 240
+      },
+      "cooldown_minutes": {
+        "description": "发送冷却",
+        "type": "int",
+        "hint": "两次非委托主动消息之间的最短间隔，单位为分钟。",
+        "default": 120
+      },
+      "daily_budget_min": {
+        "description": "日预算下限",
+        "type": "int",
+        "hint": "每天随机主动消息额度的下限。",
+        "default": 1
+      },
+      "daily_budget_max": {
+        "description": "日预算上限",
+        "type": "int",
+        "hint": "每天随机主动消息额度的上限。",
+        "default": 3
+      },
+      "llm_bonus_max": {
+        "description": "LLM 额外预算",
+        "type": "int",
+        "hint": "LLM 根据日程建议增加额度的最大值。",
+        "default": 2
+      },
+      "daily_hard_max": {
+        "description": "日硬上限",
+        "type": "int",
+        "hint": "每天发送主动消息的绝对上限。",
+        "default": 5
+      }
     }
   },
   "group_settings": {
-    "description": "👥 群聊主动消息",
+    "description": "👥 群聊主动",
     "type": "object",
     "items": {
-      "enable": {"description": "启用群聊主动消息", "type": "bool", "default": false},
-      "session_list": {"description": "允许主动消息的群聊 UMO 白名单", "type": "list", "default": []},
-      "idle_min_minutes": {"description": "群聊沉默触发最短时间", "type": "int", "default": 45},
-      "idle_max_minutes": {"description": "群聊沉默触发最长时间", "type": "int", "default": 120},
-      "cooldown_minutes": {"description": "两次非委托主动消息最短间隔", "type": "int", "default": 180},
-      "daily_budget_min": {"description": "随机日预算下限", "type": "int", "default": 0},
-      "daily_budget_max": {"description": "随机日预算上限", "type": "int", "default": 1},
-      "llm_bonus_max": {"description": "LLM 可增加的预算上限", "type": "int", "default": 1},
-      "daily_hard_max": {"description": "每日硬上限", "type": "int", "default": 2}
+      "enable": {
+        "description": "启用群聊主动",
+        "type": "bool",
+        "hint": "仅向白名单中的群聊 UMO 发送主动消息。",
+        "default": false
+      },
+      "session_list": {
+        "description": "群聊白名单",
+        "type": "list",
+        "hint": "可使用 /sid 获取 UMO；仅列表内会调度主动消息。",
+        "default": []
+      },
+      "idle_min_minutes": {
+        "description": "最短沉默时间",
+        "type": "int",
+        "hint": "群聊空闲达到此时间后才可触发，单位为分钟。",
+        "default": 45
+      },
+      "idle_max_minutes": {
+        "description": "最长沉默时间",
+        "type": "int",
+        "hint": "调度会在最短值与此值之间随机选择，单位为分钟。",
+        "default": 120
+      },
+      "cooldown_minutes": {
+        "description": "发送冷却",
+        "type": "int",
+        "hint": "两次非委托主动消息之间的最短间隔，单位为分钟。",
+        "default": 180
+      },
+      "daily_budget_min": {
+        "description": "日预算下限",
+        "type": "int",
+        "hint": "每天随机主动消息额度的下限。",
+        "default": 0
+      },
+      "daily_budget_max": {
+        "description": "日预算上限",
+        "type": "int",
+        "hint": "每天随机主动消息额度的上限。",
+        "default": 1
+      },
+      "llm_bonus_max": {
+        "description": "LLM 额外预算",
+        "type": "int",
+        "hint": "LLM 根据日程建议增加额度的最大值。",
+        "default": 1
+      },
+      "daily_hard_max": {
+        "description": "日硬上限",
+        "type": "int",
+        "hint": "每天发送主动消息的绝对上限。",
+        "default": 2
+      }
     }
   },
   "delivery_settings": {
-    "description": "📨 发送与安全限制",
+    "description": "📨 发送限制",
     "type": "object",
     "items": {
-      "max_unanswered": {"description": "连续未回复暂停阈值", "type": "int", "default": 3},
-      "sleep_exception_probability": {"description": "每个会话每日睡眠异常概率", "type": "float", "default": 0.08},
-      "minimum_idle_for_window_minutes": {"description": "日程节点发送前最短会话沉默", "type": "int", "default": 20},
-      "segment_reply": {"description": "启用分段发送", "type": "bool", "default": true},
-      "segment_max_chars": {"description": "每段最大字符数", "type": "int", "default": 80},
-      "segment_interval_seconds": {"description": "分段间隔秒数", "type": "float", "default": 1.2},
-      "recent_chat_messages": {"description": "生成主动消息参考的最近历史条数", "type": "int", "default": 8},
+      "max_unanswered": {
+        "description": "未回复阈值",
+        "type": "int",
+        "hint": "连续未获回复达到此次数后暂停主动消息。",
+        "default": 3
+      },
+      "sleep_exception_probability": {
+        "description": "睡眠异常概率",
+        "type": "float",
+        "hint": "每个会话每天在睡眠中触发一次异常主动消息的概率，范围 0-1。",
+        "default": 0.08
+      },
+      "minimum_idle_for_window_minutes": {
+        "description": "窗口最短沉默",
+        "type": "int",
+        "hint": "日程窗口触发前要求的最短会话空闲时间，单位为分钟。",
+        "default": 20
+      },
+      "segment_reply": {
+        "description": "启用分段发送",
+        "type": "bool",
+        "hint": "过长的主动消息按字符数拆分发送。",
+        "default": true
+      },
+      "segment_max_chars": {
+        "description": "分段字符上限",
+        "type": "int",
+        "hint": "启用分段后，每段最多包含的字符数。",
+        "default": 80
+      },
+      "segment_interval_seconds": {
+        "description": "分段发送间隔",
+        "type": "float",
+        "hint": "分段消息之间的等待时间，单位为秒。",
+        "default": 1.2
+      },
+      "recent_chat_messages": {
+        "description": "最近聊天条数",
+        "type": "int",
+        "hint": "生成主动消息时参考的最近会话记录数量。",
+        "default": 8
+      },
       "proactive_prompt": {
         "description": "主动消息提示词",
         "type": "text",
+        "hint": "可使用 {current_time}、{current_state}、{intent}、{unanswered_count}。",
         "default": "你需要以当前人格自然地发起一条主动消息。当前时间：{current_time}。当前状态：{current_state}。触发原因：{intent}。连续未获回应：{unanswered_count} 次。结合会话历史，只输出要发送的消息正文，不要解释任务。"
       }
     }
   },
   "followup_settings": {
-    "description": "⏰ 用户委托回访",
+    "description": "⏰ 回访",
     "type": "object",
     "items": {
-      "enable": {"description": "启用 LLM 回访工具", "type": "bool", "default": true},
-      "misfire_grace_minutes": {"description": "重启后允许补发的延迟窗口", "type": "int", "default": 30},
-      "max_pending_per_session": {"description": "每个会话最多待执行回访", "type": "int", "default": 10}
+      "enable": {
+        "description": "启用回访工具",
+        "type": "bool",
+        "hint": "允许模型在用户明确委托时创建定时回访。",
+        "default": true
+      },
+      "misfire_grace_minutes": {
+        "description": "补发容忍窗口",
+        "type": "int",
+        "hint": "插件重启后仍允许补发的最大延迟，单位为分钟。",
+        "default": 30
+      },
+      "max_pending_per_session": {
+        "description": "会话待回访上限",
+        "type": "int",
+        "hint": "单个会话同时保留的回访任务最大数量。",
+        "default": 10
+      }
     }
   }
 }
