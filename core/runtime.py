@@ -38,6 +38,14 @@ class SchedulerRuntime:
             misfire_grace_time=max(1, misfire_grace_time),
         )
 
+    def scheduled_jobs(self) -> list[tuple[str, datetime]]:
+        jobs = []
+        for job in self.scheduler.get_jobs():
+            run_at = getattr(job, "next_run_time", None)
+            if run_at is not None:
+                jobs.append((job.id, run_at))
+        return sorted(jobs, key=lambda item: (item[1], item[0]))
+
     def remove_prefix(self, prefix: str) -> None:
         for job in self.scheduler.get_jobs():
             if job.id.startswith(prefix):

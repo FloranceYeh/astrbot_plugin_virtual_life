@@ -22,6 +22,14 @@ class CommandGroupContractTests(unittest.TestCase):
         self.assertIn("self.config.save_config()", self.source)
         self.assertNotIn('@filter.command("sid")', self.source)
 
+    def test_proactive_commands_share_group(self):
+        self.assertIn('@filter.command_group("主动消息")', self.source)
+        for command in ("状态", "立即", "回访列表", "取消回访", "执行时间"):
+            self.assertIn(f'@proactive_group.command("{command}")', self.source)
+        for legacy in ("主动消息状态", "立即主动", "回访列表", "取消回访"):
+            self.assertNotIn(f'@filter.command("{legacy}")', self.source)
+        self.assertIn("self.runtime.scheduled_jobs()", self.source)
+
     def test_long_term_commands_share_group(self):
         self.assertIn('@filter.command_group("大时间表")', self.source)
         for command in ("生成", "导入", "草稿", "批准", "拒绝", "列表", "查看", "重生成"):

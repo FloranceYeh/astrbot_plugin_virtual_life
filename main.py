@@ -553,6 +553,43 @@ class ProactiveVirtualDailyPlugin(Star):
             key=lambda task: task.scheduled_at,
         )
 
+    def _scheduled_proactive_entries(self, umo: str, plan: DailyPlan) -> list[tuple[datetime, str]]:
+        job_times = dict(self.runtime.scheduled_jobs())
+        umo_hash = self._umo_hash(umo)
+        plan_prefix = f"pvd:{umo_hash}:plan:"
+        windows = {window.id: window for window in plan.proactive_windows}
+        entries: list[tuple[datetime, str]] = []
+
+        idle_time = job_times.get(f"pvd:{umo_hash}:idle")
+        if idle_time:
+            entries.append((idle_time, "沉默主动"))
+
+        for job_id, run_at in job_times.items():
+            if not job_id.startswith(plan_prefix):
+                continue
+            suffix = job_id[len(plan_prefix):]
+            if suffix == "sleep":
+                entries.append((run_at, "睡眠异常主动"))
+            elif suffix.startswith("window-retry:"):
+                window_id = suffix.removeprefix("window-retry:")
+                window = windows.get(window_id)
+                label = f"延迟窗口 [{window_id}]"
+                entries.append((run_at, label + (f" · {window.intent}" if window else "")))
+            elif suffix.startswith("window:"):
+                window_id = suffix.removeprefix("window:")
+                window = windows.get(window_id)
+                label = f"日程窗口 [{window_id}]"
+                entries.append((run_at, label + (f" · {window.intent}" if window else "")))
+
+        for task in self._pending_followups(umo):
+            run_at = job_times.get(
+                f"pvd:followup:{task.id}",
+                parse_datetime(task.scheduled_at, self.timezone),
+            )
+            entries.append((run_at, f"用户回访 [{task.id}] · {task.intent}"))
+
+        return sorted(entries, key=lambda item: (item[0], item[1]))
+
     async def _refresh_persona_daily_plan(self, persona: PersonaContext) -> DailyPlan:
         plan = await self._ensure_plan(persona, self._now().date(), force=True)
         for umo in self.policy.enabled_sessions():
@@ -963,7 +1000,12 @@ class ProactiveVirtualDailyPlugin(Star):
             return
         yield event.plain_result("已生成替换全部阶段的草稿，使用 /大时间表 草稿 查看，批准后才会生效。")
 
-    @filter.command("主动消息状态")
+    @filter.command_group("主动消息")
+    def proactive_group(self):
+        """主动消息命令组；不提供子命令时由 AstrBot 输出帮助。"""
+        pass
+
+    @proactive_group.command("状态")
     async def proactive_status(self, event: AstrMessageEvent):
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
         state = self.policy.ensure_state(event.unified_msg_origin, persona.id, plan, self._now())
@@ -973,17 +1015,31 @@ class ProactiveVirtualDailyPlugin(Star):
             f"连续未回复：{state.unanswered_count}\n待执行回访：{pending}"
         )
 
+    @proactive_group.command("立即")
     @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("立即主动")
     async def trigger_now(self, event: AstrMessageEvent):
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
         await self._deliver(event.unified_msg_origin, persona, plan, "管理员要求立即测试主动消息", 0)
         yield event.plain_result("测试主动消息已发送。")
 
-    @filter.command("回访列表")
+    @proactive_group.command("回访列表")
     async def followup_list_command(self, event: AstrMessageEvent):
         yield event.plain_result(await self.list_proactive_followups(event))
 
-    @filter.command("取消回访")
+    @proactive_group.command("取消回访")
     async def followup_cancel_command(self, event: AstrMessageEvent, task_id: str):
         yield event.plain_result(await self.cancel_proactive_followup(event, task_id))
+
+    @proactive_group.command("执行时间")
+    async def proactive_execution_times(self, event: AstrMessageEvent):
+        _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        entries = self._scheduled_proactive_entries(event.unified_msg_origin, plan)
+        if not entries:
+            yield event.plain_result("当前会话没有已安排的主动消息。")
+            return
+        lines = ["主动消息具体执行时间："]
+        lines.extend(
+            f"- {run_at.astimezone(self.timezone).strftime('%Y-%m-%d %H:%M:%S %z')}｜{label}"
+            for run_at, label in entries
+        )
+        yield event.plain_result("\n".join(lines))
