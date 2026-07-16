@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import OUTFIT_CATEGORY_LABELS, DailyPlan, minute_of_day
+from .utils import timeline_item_at
 
 RenderHtml = Callable[..., Awaitable[str]]
 
@@ -92,7 +93,7 @@ class ScheduleImageRenderer:
             except OSError:
                 continue
 
-    async def render_daily(self, plan: DailyPlan, now: datetime) -> str:
+    async def render_timeline(self, plan: DailyPlan, now: datetime) -> str:
         items = []
         current_minute = now.hour * 60 + now.minute
         same_day = plan.date == now.date().isoformat()
@@ -116,6 +117,30 @@ class ScheduleImageRenderer:
             {"at": window.at, "intent": window.intent, "audience": window.audience}
             for window in plan.proactive_windows
         ]
+        current = timeline_item_at(plan, now) if same_day else None
+        data = self._base_data(
+            "timeline",
+            plan.persona_id,
+            {
+                "title": f"{plan.date} 虚拟日程",
+                "subtitle": plan.persona_id,
+                "status_label": f"当前时段 {current.start}–{current.end}" if current else "非今日计划",
+                "current_item": {
+                    "start": current.start,
+                    "end": current.end,
+                    "activity": current.activity,
+                    "location": current.location,
+                    "state_label": STATE_LABELS.get(current.state, current.state),
+                    "availability_label": AVAILABILITY_LABELS.get(current.availability, current.availability),
+                } if current else None,
+                "items": items,
+                "windows": windows,
+                "generated_at": now.strftime("%Y-%m-%d %H:%M"),
+            },
+        )
+        return await self._render(data, persona_id=plan.persona_id, view="timeline", cache=False)
+
+    async def render_outfit(self, plan: DailyPlan, now: datetime) -> str:
         outfit_items = [
             {
                 "category": item.category,
@@ -127,21 +152,23 @@ class ScheduleImageRenderer:
             for item in plan.outfit.items
         ]
         data = self._base_data(
-            "daily",
+            "outfit",
             plan.persona_id,
             {
-                "title": f"{plan.date} 虚拟日程",
+                "title": f"{plan.date} 今日穿搭",
                 "subtitle": plan.persona_id,
                 "theme_text": plan.theme,
                 "mood": plan.mood,
+                "outfit_style": plan.outfit.style,
                 "outfit_summary": plan.outfit.summary,
                 "outfit_items": outfit_items,
-                "items": items,
-                "windows": windows,
                 "generated_at": now.strftime("%Y-%m-%d %H:%M"),
             },
         )
-        return await self._render(data, persona_id=plan.persona_id, view="daily", cache=False)
+        return await self._render(data, persona_id=plan.persona_id, view="outfit", cache=False)
+
+    async def render_daily(self, plan: DailyPlan, now: datetime) -> str:
+        return await self.render_timeline(plan, now)
 
     async def render_stage_list(self, stages: list[dict[str, Any]], persona_id: str) -> str:
         first = min(date.fromisoformat(stage["start_date"]) for stage in stages)

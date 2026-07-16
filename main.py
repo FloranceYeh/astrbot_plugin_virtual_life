@@ -29,7 +29,9 @@ from .core.storage import PluginStorage
 from .core.utils import (
     deterministic_int,
     deterministic_probability,
+    format_outfit,
     format_plan,
+    format_timeline,
     next_available_at,
     now_in,
     parse_datetime,
@@ -657,18 +659,35 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @virtual_daily_group.command("查看")
     async def show_schedule(self, event: AstrMessageEvent):
-        """查看今日虚拟日程图片。"""
+        """查看今日虚拟日程时间轴图片。"""
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
         if plan.status != "ok":
             yield event.plain_result("今日暂无可用日程。")
             return
         now = self._now()
-        fallback = format_plan(plan, now)
+        fallback = format_timeline(plan, now)
         results = await self._image_view_results(
             event,
             f"{persona.id} · {plan.date} 虚拟日程",
             fallback,
-            [lambda: self.image_renderer.render_daily(plan, now)],
+            [lambda: self.image_renderer.render_timeline(plan, now)],
+        )
+        for result in results:
+            yield result
+
+    @virtual_daily_group.command("穿搭")
+    async def show_outfit(self, event: AstrMessageEvent):
+        """查看今日穿搭图片。"""
+        persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        if plan.status != "ok":
+            yield event.plain_result("今日暂无可用穿搭。")
+            return
+        now = self._now()
+        results = await self._image_view_results(
+            event,
+            f"{persona.id} · {plan.date} 今日穿搭",
+            format_outfit(plan),
+            [lambda: self.image_renderer.render_outfit(plan, now)],
         )
         for result in results:
             yield result

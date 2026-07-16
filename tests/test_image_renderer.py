@@ -58,18 +58,30 @@ def stage():
 
 
 class ImageRendererTests(unittest.IsolatedAsyncioTestCase):
-    async def test_daily_marks_current_item(self):
+    async def test_timeline_marks_and_summarizes_current_item(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             backend = FakeHtmlRenderer(root)
             renderer = ScheduleImageRenderer(root, backend)
-            output = await renderer.render_daily(daily_plan(), datetime(2026, 7, 14, 9, 30))
+            output = await renderer.render_timeline(daily_plan(), datetime(2026, 7, 14, 9, 30))
             self.assertTrue(Path(output).exists())
             items = backend.calls[0][1]["items"]
             self.assertFalse(items[0]["current"])
             self.assertTrue(items[1]["current"])
-            self.assertEqual(backend.calls[0][1]["outfit_items"][1]["label"], "内衣与打底")
+            self.assertEqual(backend.calls[0][1]["current_item"]["activity"], "学习")
             self.assertEqual(backend.calls[0][3]["type"], "png")
+
+    async def test_outfit_contains_style_theme_and_mood(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = FakeHtmlRenderer(root)
+            renderer = ScheduleImageRenderer(root, backend)
+            await renderer.render_outfit(daily_plan(), datetime(2026, 7, 14, 9, 30))
+            data = backend.calls[0][1]
+            self.assertEqual(data["outfit_style"], "日常休闲风")
+            self.assertEqual(data["theme_text"], "学习日")
+            self.assertEqual(data["mood"], "专注")
+            self.assertEqual(data["outfit_items"][1]["label"], "内衣与打底")
 
     async def test_stage_render_is_cached_by_content(self):
         with tempfile.TemporaryDirectory() as directory:

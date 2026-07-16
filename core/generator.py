@@ -81,6 +81,9 @@ class DailyPlanGenerator:
                     payload = extract_json_object(raw)
                     payload["date"] = target.isoformat()
                     payload["persona_id"] = persona.id
+                    outfit = payload.get("outfit")
+                    if isinstance(outfit, dict):
+                        outfit["style"] = outfit_style
                     payload["revision"] = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
                     return DailyPlan.from_dict(payload)
                 except Exception as exc:
@@ -102,7 +105,7 @@ class DailyPlanGenerator:
                 persona_id=persona.id,
                 theme="生成失败",
                 mood="未知",
-                outfit=Outfit(summary="未知", items=()),
+                outfit=Outfit(summary="未知", items=(), style="未知"),
                 timeline=(),
                 status="failed",
                 revision=hashlib.sha1(last_error.encode("utf-8")).hexdigest()[:12],
@@ -122,7 +125,7 @@ class DailyPlanGenerator:
             )
             blocks.append(
                 f"- {plan.date}｜主题：{plan.theme}｜心情：{plan.mood}｜"
-                f"穿搭：{plan.outfit.summary}｜活动：{activities}"
+                f"穿搭风格：{plan.outfit.style}｜穿搭：{plan.outfit.summary}｜活动：{activities}"
             )
         return (
             "\n\n近期同人格日程（仅用于保持生活连续性并避免重复）：\n"

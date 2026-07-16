@@ -150,6 +150,7 @@ class OutfitItem:
 class Outfit:
     summary: str
     items: tuple[OutfitItem, ...]
+    style: str = "未记录"
 
     def __post_init__(self) -> None:
         if not self.summary:
@@ -177,6 +178,7 @@ class Outfit:
         return cls(
             summary=str(value.get("summary", "")).strip(),
             items=tuple(OutfitItem.from_dict(item) for item in raw_items),
+            style=str(value.get("style", "")).strip() or "未记录",
         )
 
 

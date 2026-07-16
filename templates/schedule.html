@@ -98,13 +98,14 @@
         </div>
       </header>
       <div class="content">
-        {% if view == "daily" %}
-          <div class="summary-grid" style="grid-template-columns: repeat(2, 1fr);">
+        {% if view == "outfit" %}
+          <div class="summary-grid">
+            <div class="summary-card"><div class="label">穿搭风格</div><div class="value">{{ outfit_style }}</div></div>
             <div class="summary-card"><div class="label">今日主题</div><div class="value">{{ theme_text }}</div></div>
-            <div class="summary-card"><div class="label">心情状态</div><div class="value">{{ mood }}</div></div>
+            <div class="summary-card"><div class="label">今日心情</div><div class="value">{{ mood }}</div></div>
           </div>
           <section class="section">
-            <h2 class="section-title">今日穿搭</h2>
+            <h2 class="section-title">造型概述</h2>
             <div class="outfit-summary">{{ outfit_summary }}</div>
             <div class="outfit-grid">
               {% for item in outfit_items %}
@@ -112,6 +113,14 @@
               {% endfor %}
             </div>
           </section>
+        {% elif view == "timeline" %}
+          {% if current_item %}
+            <div class="summary-card">
+              <div class="label">当前日期所处时间段 · {{ current_item.start }}–{{ current_item.end }}</div>
+              <div class="value">{{ current_item.activity }}{% if current_item.location %} · {{ current_item.location }}{% endif %}</div>
+              <div class="detail-meta">状态：{{ current_item.state_label }} · 联系：{{ current_item.availability_label }}</div>
+            </div>
+          {% endif %}
           <section class="section">
             <h2 class="section-title">24 小时时间轴</h2>
             <div class="timeline">

@@ -3,7 +3,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from core.models import DailyPlan
-from core.utils import next_available_at, timeline_item_at
+from core.utils import format_outfit, format_timeline, next_available_at, timeline_item_at
 
 from tests.fixtures import outfit_payload
 
@@ -32,6 +32,17 @@ class UtilsTests(unittest.TestCase):
         now = datetime(2026, 7, 14, 9, 0, tzinfo=self.tz)
         self.assertEqual(timeline_item_at(self.plan, now).id, "busy")
         self.assertEqual(next_available_at(self.plan, now).hour, 12)
+
+    def test_split_query_fallbacks(self):
+        now = datetime(2026, 7, 14, 9, 0, tzinfo=self.tz)
+        timeline = format_timeline(self.plan, now)
+        outfit = format_outfit(self.plan)
+        self.assertIn("当前时段：08:00-12:00", timeline)
+        self.assertNotIn("穿搭风格", timeline)
+        self.assertIn("穿搭风格：日常休闲风", outfit)
+        self.assertIn("今日主题：日常", outfit)
+        self.assertIn("今日心情：平静", outfit)
+        self.assertNotIn("24 小时时间轴", outfit)
 
 
 if __name__ == "__main__":

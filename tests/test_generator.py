@@ -69,6 +69,7 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         plan = await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
         self.assertEqual(plan.status, "ok")
         self.assertEqual(plan.persona_id, "alice")
+        self.assertEqual(plan.outfit.style, "日常休闲风")
         self.assertEqual(provider.calls, 2)
 
     async def test_invalid_outputs_create_failed_plan(self):

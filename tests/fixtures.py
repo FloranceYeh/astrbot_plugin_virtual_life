@@ -1,5 +1,6 @@
-def outfit_payload(summary: str = "清爽的日常造型") -> dict:
+def outfit_payload(summary: str = "清爽的日常造型", style: str = "日常休闲风") -> dict:
     return {
+        "style": style,
         "summary": summary,
         "items": [
             {"category": "hairstyle", "name": "自然披肩发", "details": "梳理整齐"},

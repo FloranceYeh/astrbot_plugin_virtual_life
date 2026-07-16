@@ -36,6 +36,13 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(plan.private_bonus, 2)
         self.assertEqual(plan.timeline[-1].end, "24:00")
         self.assertEqual(plan.outfit.items[1].category, "underwear")
+        self.assertEqual(plan.outfit.style, "日常休闲风")
+
+    def test_legacy_outfit_without_style_is_supported(self):
+        payload = valid_payload()
+        payload["outfit"].pop("style")
+        plan = DailyPlan.from_dict(payload)
+        self.assertEqual(plan.outfit.style, "未记录")
 
     def test_string_outfit_is_rejected(self):
         payload = valid_payload()

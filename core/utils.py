@@ -106,6 +106,37 @@ def format_plan(plan: DailyPlan, moment: datetime | None = None) -> str:
     return "\n".join(lines)
 
 
+def format_timeline(plan: DailyPlan, moment: datetime | None = None) -> str:
+    current = timeline_item_at(plan, moment) if moment else None
+    lines = [f"📅 {plan.date} 虚拟日程"]
+    if current:
+        location = f" @ {current.location}" if current.location else ""
+        lines.append(f"📍 当前时段：{current.start}-{current.end} {current.activity}{location}")
+    lines.append("📝 24 小时时间轴：")
+    lines.extend(
+        f"- {item.start}-{item.end} {item.activity}" + (f" @ {item.location}" if item.location else "")
+        for item in plan.timeline
+    )
+    return "\n".join(lines)
+
+
+def format_outfit(plan: DailyPlan) -> str:
+    outfit_items = "；".join(
+        f"{OUTFIT_CATEGORY_LABELS[item.category]}：{item.name}"
+        for item in plan.outfit.items
+    )
+    lines = [
+        f"👗 {plan.date} 今日穿搭",
+        f"🎨 穿搭风格：{plan.outfit.style}",
+        f"💡 今日主题：{plan.theme}",
+        f"💭 今日心情：{plan.mood}",
+        f"✨ 造型概述：{plan.outfit.summary}",
+    ]
+    if outfit_items:
+        lines.append(f"🧥 穿搭明细：{outfit_items}")
+    return "\n".join(lines)
+
+
 def prune_date_keys(values: dict[str, object], keep_days: int, today: date) -> dict[str, object]:
     threshold = today - timedelta(days=max(1, keep_days))
     result = {}

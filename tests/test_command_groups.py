@@ -11,6 +11,7 @@ class CommandGroupContractTests(unittest.TestCase):
     def test_daily_schedule_uses_group_only(self):
         self.assertIn('@filter.command_group("虚拟日程")', self.source)
         self.assertIn('@virtual_daily_group.command("查看")', self.source)
+        self.assertIn('@virtual_daily_group.command("穿搭")', self.source)
         self.assertIn('@virtual_daily_group.command("重写")', self.source)
         self.assertNotIn('@filter.command("查看虚拟日程"', self.source)
         self.assertNotIn('@filter.command("重写虚拟日程"', self.source)
@@ -27,7 +28,8 @@ class CommandGroupContractTests(unittest.TestCase):
             self.assertIn(f'@long_term_group.command("{command}")', self.source)
 
     def test_view_commands_use_image_renderer(self):
-        self.assertIn("self.image_renderer.render_daily", self.source)
+        self.assertIn("self.image_renderer.render_timeline", self.source)
+        self.assertIn("self.image_renderer.render_outfit", self.source)
         self.assertIn("self.image_renderer.render_stage_list", self.source)
         self.assertIn('status="draft"', self.source)
         self.assertIn("self.image_renderer.render_stage(stage, persona.id)", self.source)
@@ -42,9 +44,10 @@ class CommandGroupContractTests(unittest.TestCase):
         schema = json.loads(Path("_conf_schema.json").read_text(encoding="utf-8"))
         system_prompt = schema["schedule_settings"]["items"]["generation_system_prompt"]["default"]
         prompt_template = schema["schedule_settings"]["items"]["prompt_template"]["default"]
-        self.assertIn("outfit 必须是包含 summary 和 items 的 JSON 对象", system_prompt)
+        self.assertIn("outfit 必须是包含 style、summary 和 items 的 JSON 对象", system_prompt)
         self.assertIn("underwear", system_prompt)
         self.assertIn("outfit 必须是对象", prompt_template)
+        self.assertIn("style", prompt_template)
 
 
 if __name__ == "__main__":
