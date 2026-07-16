@@ -56,6 +56,18 @@
 
 完整版本历史见 `CHANGELOG.md`。
 
+### 图片预览脚本
+
+无需启动 AstrBot，可使用内置示例数据直接生成 PNG，脚本会优先使用本机 Chrome、Edge 或 Chromium：
+
+```bash
+python scripts/render_image_preview.py --view timeline
+python scripts/render_image_preview.py --view outfit stage-list stage-detail --theme light
+python scripts/render_image_preview.py --view all --output-dir preview_output
+```
+
+脚本依赖 `jinja2` 与 `playwright`；可通过 `--browser` 指定浏览器可执行文件，通过 `--width`、`--theme` 和 `--font` 调整预览样式。
+
 ## 配置
 
 主动消息只对以下配置中的 UMO 生效：
