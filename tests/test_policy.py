@@ -9,7 +9,7 @@ from core.proactive import ProactivePolicy
 from tests.fixtures import outfit_payload
 
 
-def plan(private_bonus=2, group_bonus=1):
+def plan(private_bonus=2, group_bonus=1, availability="normal", state="available"):
     return DailyPlan.from_dict(
         {
             "date": "2026-07-14",
@@ -18,7 +18,7 @@ def plan(private_bonus=2, group_bonus=1):
             "mood": "平静",
             "outfit": outfit_payload(),
             "timeline": [
-                {"id": "all", "start": "00:00", "end": "24:00", "activity": "休息", "state": "available", "availability": "normal"}
+                {"id": "all", "start": "00:00", "end": "24:00", "activity": "休息", "state": state, "availability": availability}
             ],
             "proactive_windows": [],
             "budget_bonus": {"private": private_bonus, "group": group_bonus},
@@ -40,7 +40,11 @@ class PolicyTests(unittest.TestCase):
                 "cooldown_minutes": 120,
             },
             "group_settings": {"enable": False, "session_list": []},
-            "delivery_settings": {"max_unanswered": 3, "minimum_idle_for_window_minutes": 20},
+            "delivery_settings": {
+                "max_unanswered": 3,
+                "minimum_idle_for_window_minutes": 20,
+                "availability_probabilities": {"blocked": 0.0, "low": 0.25, "normal": 0.7, "high": 1.0},
+            },
         }
         self.storage = SimpleNamespace(sessions={})
         self.policy = ProactivePolicy(self.config, self.storage, ZoneInfo("Asia/Shanghai"))
@@ -57,6 +61,41 @@ class PolicyTests(unittest.TestCase):
         decision = self.policy.evaluate(umo=self.umo, state=state, current_item=None, now=self.now, trigger="idle")
         self.assertFalse(decision.allowed)
         self.assertIn("unanswered", decision.reason)
+
+    def test_blocked_availability_has_zero_probability(self):
+        current_item = plan(availability="blocked").timeline[0]
+        self.assertEqual(self.policy.availability_probability(current_item), 0.0)
+
+    def test_high_availability_always_allows_probability_gate(self):
+        current_plan = plan(availability="high")
+        state = self.policy.ensure_state(self.umo, "alice", current_plan, self.now)
+        state.daily_budget = 10
+        state.last_user_message_at = (self.now - timedelta(hours=1)).isoformat()
+        decision = self.policy.evaluate(
+            umo=self.umo,
+            state=state,
+            current_item=current_plan.timeline[0],
+            now=self.now,
+            trigger="window",
+            attempt_key="high",
+        )
+        self.assertTrue(decision.allowed)
+
+    def test_blocked_availability_rejects_probability_gate(self):
+        current_plan = plan(availability="blocked")
+        state = self.policy.ensure_state(self.umo, "alice", current_plan, self.now)
+        state.daily_budget = 10
+        state.last_user_message_at = (self.now - timedelta(hours=1)).isoformat()
+        decision = self.policy.evaluate(
+            umo=self.umo,
+            state=state,
+            current_item=current_plan.timeline[0],
+            now=self.now,
+            trigger="window",
+            attempt_key="blocked",
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "availability probability rejected")
 
     def test_incoming_resets_unanswered(self):
         state = self.policy.ensure_state(self.umo, "alice", plan(), self.now)

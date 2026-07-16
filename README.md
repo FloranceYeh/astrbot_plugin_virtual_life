@@ -94,6 +94,7 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 - 连续未回复暂停阈值：`3`
 - 睡眠异常概率：`0.08`
 - 日程主动窗口随机偏移：`15` 分钟，可通过 `delivery_settings.proactive_window_jitter_minutes` 设置为 `0-60`，`0` 表示关闭
+- 普通主动消息按 `blocked/low/normal/high = 0%/25%/70%/100%` 的默认概率触发；窗口未命中时延迟到下一可打扰时段，并在意图中注明原定日程已结束
 - `delivery_settings.segmented_reply_settings` 管理主动消息分段；默认使用关键词模式，原文不超过 `150` 字符时按中英文句末标点与换行拆分，超过阈值时整条发送
 - 分段模式可切换为 `regex`；内容清理拥有独立开关，发送间隔支持 `log` 和 `random`，默认按中英文字数使用 `log`
 - 回访任务重启补发窗口：`30` 分钟

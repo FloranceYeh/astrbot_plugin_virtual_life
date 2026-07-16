@@ -411,6 +411,17 @@
         "hint": "日程窗口触发前要求的最短会话空闲时间，单位为分钟。",
         "default": 20
       },
+      "availability_probabilities": {
+        "description": "可打扰程度触发概率",
+        "type": "object",
+        "hint": "普通主动消息在各可打扰程度下的触发概率，范围 0-1。",
+        "items": {
+          "blocked": {"description": "禁止打扰", "type": "float", "default": 0.0},
+          "low": {"description": "低可打扰", "type": "float", "default": 0.25},
+          "normal": {"description": "普通可打扰", "type": "float", "default": 0.7},
+          "high": {"description": "高可打扰", "type": "float", "default": 1.0}
+        }
+      },
       "proactive_window_jitter_minutes": {
         "description": "主动窗口随机偏移",
         "type": "int",

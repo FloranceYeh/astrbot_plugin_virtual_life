@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .models import DailyPlan, SessionState, TimelineItem
-from .utils import deterministic_int, parse_datetime
+from .utils import deterministic_int, deterministic_probability, parse_datetime
 
 
 @dataclass(slots=True, frozen=True)
@@ -90,6 +90,7 @@ class ProactivePolicy:
         current_item: TimelineItem | None,
         now: datetime,
         trigger: str,
+        attempt_key: str = "",
     ) -> SendDecision:
         if not self.is_enabled(umo):
             return SendDecision(False, "session disabled or not whitelisted")
@@ -114,9 +115,24 @@ class ProactivePolicy:
         if trigger != "sleep":
             if current_item and current_item.state == "sleep":
                 return SendDecision(False, "sleeping")
-            if current_item and current_item.availability in {"blocked", "low"}:
-                return SendDecision(False, "current schedule is not interruptible")
+            probability = self.availability_probability(current_item)
+            probability_key = attempt_key or (current_item.id if current_item else "none")
+            if deterministic_probability(f"availability::{state.date}::{umo}::{probability_key}") >= probability:
+                return SendDecision(False, "availability probability rejected")
         return SendDecision(True, "allowed")
+
+    def availability_probability(self, current_item: TimelineItem | None) -> float:
+        if current_item is None:
+            return 1.0
+        delivery = self.config.get("delivery_settings", {}) or {}
+        configured = delivery.get("availability_probabilities", {}) or {}
+        raw = configured.get(current_item.availability)
+        if raw is None:
+            return 1.0
+        try:
+            return max(0.0, min(1.0, float(raw)))
+        except (TypeError, ValueError):
+            return 1.0
 
     def record_delivery(self, state: SessionState, now: datetime) -> None:
         state.sent_count += 1

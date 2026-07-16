@@ -264,7 +264,61 @@ class ProactiveVirtualDailyPlugin(Star):
         window = next((value for value in plan.proactive_windows if value.id == window_id), None)
         if not window:
             return
-        await self._attempt_unsolicited(umo, persona, plan, window.intent, "window")
+        await self._attempt_window(umo, persona, plan, window, delayed=False)
+
+    async def _run_delayed_window(
+        self, umo: str, persona_id: str, revision: str, window_id: str, scheduled_at: str
+    ) -> None:
+        persona, plan = await self._ensure_plan_for_umo(umo)
+        if persona.id != persona_id or plan.revision != revision:
+            return
+        window = next((value for value in plan.proactive_windows if value.id == window_id), None)
+        if not window:
+            return
+        await self._attempt_window(umo, persona, plan, window, delayed=True, attempt_key=scheduled_at)
+
+    async def _attempt_window(
+        self,
+        umo: str,
+        persona: PersonaContext,
+        plan: DailyPlan,
+        window: ProactiveWindow,
+        *,
+        delayed: bool,
+        attempt_key: str = "",
+    ) -> None:
+        intent = window.intent
+        if delayed:
+            source = next(item for item in plan.timeline if item.id == window.source_item_id)
+            intent = f"延迟的主动消息：原定日程「{source.activity}」已结束。{intent}"
+        sent, reason = await self._attempt_unsolicited(
+            umo,
+            persona,
+            plan,
+            intent,
+            "window",
+            attempt_key=attempt_key or window.id,
+        )
+        if not sent and reason in {"sleeping", "availability probability rejected"}:
+            self._schedule_window_retry(umo, persona, plan, window)
+
+    def _schedule_window_retry(
+        self, umo: str, persona: PersonaContext, plan: DailyPlan, window: ProactiveWindow
+    ) -> None:
+        next_time = next_available_at(plan, self._now())
+        if not next_time:
+            return
+        run_at = next_time + timedelta(minutes=random.randint(3, 15))
+        self.runtime.add_date_job(
+            f"pvd:{self._umo_hash(umo)}:plan:window-retry:{window.id}",
+            run_at,
+            self._run_delayed_window,
+            umo,
+            persona.id,
+            plan.revision,
+            window.id,
+            run_at.isoformat(),
+        )
 
     async def _run_sleep(self, umo: str, persona_id: str, revision: str) -> None:
         persona, plan = await self._ensure_plan_for_umo(umo)
@@ -278,7 +332,7 @@ class ProactiveVirtualDailyPlugin(Star):
         if sent:
             self._schedule_idle(umo)
             return
-        if reason == "current schedule is not interruptible" or reason == "sleeping":
+        if reason in {"sleeping", "availability probability rejected"}:
             next_time = next_available_at(plan, self._now())
             if next_time:
                 self._schedule_idle(umo, run_at=next_time + timedelta(minutes=random.randint(3, 15)))
@@ -292,13 +346,22 @@ class ProactiveVirtualDailyPlugin(Star):
         plan: DailyPlan,
         intent: str,
         trigger: str,
+        *,
+        attempt_key: str = "",
     ) -> tuple[bool, str]:
         lock = self.delivery_locks.setdefault(umo, asyncio.Lock())
         async with lock:
             now = self._now()
             state = self.policy.ensure_state(umo, persona.id, plan, now)
             current_item = timeline_item_at(plan, now)
-            decision = self.policy.evaluate(umo=umo, state=state, current_item=current_item, now=now, trigger=trigger)
+            decision = self.policy.evaluate(
+                umo=umo,
+                state=state,
+                current_item=current_item,
+                now=now,
+                trigger=trigger,
+                attempt_key=attempt_key,
+            )
             if not decision.allowed:
                 logger.info("[虚拟人生] 跳过 %s: %s", umo, decision.reason)
                 return False, decision.reason
