@@ -390,6 +390,12 @@ class ProactiveVirtualDailyPlugin(Star):
             unanswered_count=unanswered_count,
         )
         await self._send_text(umo, text)
+        await self.message_generator.record_conversation(
+            umo=umo,
+            persona_id=persona.id,
+            intent=intent,
+            assistant_text=text,
+        )
 
     async def _send_text(self, umo: str, text: str) -> None:
         result = self.message_segmenter.split(text)

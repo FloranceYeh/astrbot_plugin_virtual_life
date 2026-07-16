@@ -20,16 +20,29 @@ class Provider:
 
 
 class ConversationManager:
+    def __init__(self, conversation_id=None):
+        self.conversation_id = conversation_id
+        self.created = []
+        self.pairs = []
+
     async def get_curr_conversation_id(self, umo):
-        return None
+        return self.conversation_id
+
+    async def new_conversation(self, umo, persona_id=None):
+        self.created.append((umo, persona_id))
+        self.conversation_id = "created-conversation"
+        return self.conversation_id
+
+    async def add_message_pair(self, **kwargs):
+        self.pairs.append(kwargs)
 
 
 class Context:
-    def __init__(self, default_provider, selected_provider):
+    def __init__(self, default_provider, selected_provider, conversation_manager=None):
         self.default_provider = default_provider
         self.selected_provider = selected_provider
         self.requested_provider_ids = []
-        self.conversation_manager = ConversationManager()
+        self.conversation_manager = conversation_manager or ConversationManager()
 
     def get_provider_by_id(self, provider_id):
         self.requested_provider_ids.append(provider_id)
@@ -69,6 +82,37 @@ class MessageGeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.requested_provider_ids, ["proactive-provider"])
         self.assertEqual(selected_provider.calls, 1)
         self.assertEqual(default_provider.calls, 0)
+
+    async def test_record_conversation_appends_proactive_pair(self):
+        manager = ConversationManager("conversation-1")
+        generator = ProactiveMessageGenerator(Context(Provider(), None, manager), {})
+        recorded = await generator.record_conversation(
+            umo="aiocqhttp:FriendMessage:42",
+            persona_id="alice",
+            intent="分享午饭",
+            assistant_text="今天的午饭很好吃。",
+        )
+        self.assertTrue(recorded)
+        self.assertEqual(manager.created, [])
+        self.assertEqual(manager.pairs[0]["cid"], "conversation-1")
+        user_message = manager.pairs[0]["user_message"].model_dump()
+        assistant_message = manager.pairs[0]["assistant_message"].model_dump()
+        self.assertIn("主动消息触发", user_message["content"][0]["text"])
+        self.assertIn("分享午饭", user_message["content"][0]["text"])
+        self.assertEqual(assistant_message["content"][0]["text"], "今天的午饭很好吃。")
+
+    async def test_record_conversation_creates_missing_conversation(self):
+        manager = ConversationManager()
+        generator = ProactiveMessageGenerator(Context(Provider(), None, manager), {})
+        recorded = await generator.record_conversation(
+            umo="aiocqhttp:FriendMessage:42",
+            persona_id="alice",
+            intent="分享街景",
+            assistant_text="给你看看今天拍到的街景。",
+        )
+        self.assertTrue(recorded)
+        self.assertEqual(manager.created, [("aiocqhttp:FriendMessage:42", "alice")])
+        self.assertEqual(manager.pairs[0]["cid"], "created-conversation")
 
     async def test_legacy_provider_setting_is_not_used(self):
         default_provider = Provider()

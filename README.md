@@ -216,7 +216,7 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 - `followups.json`：用户委托回访
 - `long_term_timelines.json`：按人格保存已批准阶段、待批准草稿和管理员通知会话
 
-文件使用异步锁和临时文件替换写入。日程生成不读取任何具体会话历史；只有为目标会话生成最终主动消息时才读取该会话最近记录。
+文件使用异步锁和临时文件替换写入。日程生成不读取任何具体会话历史；只有为目标会话生成最终主动消息时才读取该会话最近记录。主动消息成功发送后会以系统触发说明和 assistant 正文写入当前 AstrBot 对话历史，使后续对话能够感知已发送内容；没有当前对话时会自动创建。
 
 生成新日程时会按 `schedule_settings.reference_history_days` 读取同一人格之前若干自然日的有效日程，帮助模型保持生活连续性并减少主题、穿搭和活动组合重复。不同人格的历史不会互相引用。
 
