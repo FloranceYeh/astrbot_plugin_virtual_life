@@ -30,6 +30,8 @@ class CommandGroupContractTests(unittest.TestCase):
     def test_view_commands_use_image_renderer(self):
         self.assertIn("self.image_renderer.render_timeline", self.source)
         self.assertIn("self.image_renderer.render_outfit", self.source)
+        self.assertIn("self.long_term.expand_day", self.source)
+        self.assertIn("self.long_term.holidays.on", self.source)
         self.assertIn("self.image_renderer.render_stage_list", self.source)
         self.assertIn('status="draft"', self.source)
         self.assertIn("self.image_renderer.render_stage(stage, persona.id)", self.source)

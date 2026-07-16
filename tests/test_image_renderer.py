@@ -63,13 +63,52 @@ class ImageRendererTests(unittest.IsolatedAsyncioTestCase):
             root = Path(directory)
             backend = FakeHtmlRenderer(root)
             renderer = ScheduleImageRenderer(root, backend)
-            output = await renderer.render_timeline(daily_plan(), datetime(2026, 7, 14, 9, 30))
+            long_term_day = {
+                "stage": {
+                    "name": "暑期学习阶段",
+                    "kind": "academic",
+                    "start_date": "2026-07-01",
+                    "end_date": "2026-08-31",
+                    "summary": "集中学习",
+                },
+                "active_periods": [
+                    {
+                        "name": "考试周",
+                        "start_date": "2026-07-13",
+                        "end_date": "2026-07-19",
+                        "constraints": ["减少娱乐", "保证睡眠"],
+                    }
+                ],
+                "holidays": [{"date": "2026-07-14", "name": "纪念日", "kind": "public"}],
+            }
+            output = await renderer.render_timeline(daily_plan(), datetime(2026, 7, 14, 9, 30), long_term_day)
             self.assertTrue(Path(output).exists())
-            items = backend.calls[0][1]["items"]
+            data = backend.calls[0][1]
+            items = data["items"]
             self.assertFalse(items[0]["current"])
             self.assertTrue(items[1]["current"])
-            self.assertEqual(backend.calls[0][1]["current_item"]["activity"], "学习")
+            self.assertEqual(data["status_label"], "当前时段 08:00–24:00")
+            self.assertEqual(data["theme_text"], "学习日")
+            self.assertEqual(data["mood"], "专注")
+            self.assertEqual(data["current_stage"]["name"], "暑期学习阶段")
+            self.assertEqual(data["active_periods"][0]["constraints_text"], "减少娱乐；保证睡眠")
+            self.assertEqual(data["today_holidays"][0]["name"], "纪念日")
             self.assertEqual(backend.calls[0][3]["type"], "png")
+
+    async def test_timeline_without_stage_uses_empty_stage_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = FakeHtmlRenderer(root)
+            renderer = ScheduleImageRenderer(root, backend)
+            await renderer.render_timeline(
+                daily_plan(),
+                datetime(2026, 7, 14, 9, 30),
+                {"stage": None, "active_periods": [], "holidays": []},
+            )
+            data = backend.calls[0][1]
+            self.assertIsNone(data["current_stage"])
+            self.assertEqual(data["active_periods"], [])
+            self.assertEqual(data["today_holidays"], [])
 
     async def test_outfit_contains_style_theme_and_mood(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -35,14 +35,46 @@ class UtilsTests(unittest.TestCase):
 
     def test_split_query_fallbacks(self):
         now = datetime(2026, 7, 14, 9, 0, tzinfo=self.tz)
-        timeline = format_timeline(self.plan, now)
+        timeline = format_timeline(
+            self.plan,
+            now,
+            {
+                "stage": {
+                    "name": "暑期阶段",
+                    "start_date": "2026-07-01",
+                    "end_date": "2026-08-31",
+                },
+                "active_periods": [
+                    {
+                        "name": "考试周",
+                        "start_date": "2026-07-13",
+                        "end_date": "2026-07-19",
+                        "constraints": ["减少娱乐"],
+                    }
+                ],
+                "holidays": [{"name": "纪念日"}],
+            },
+        )
         outfit = format_outfit(self.plan)
         self.assertIn("当前时段：08:00-12:00", timeline)
+        self.assertIn("今日主题：日常", timeline)
+        self.assertIn("心情状态：平静", timeline)
+        self.assertIn("当前大时间段：暑期阶段", timeline)
+        self.assertIn("特殊时间段：考试周", timeline)
+        self.assertIn("今日节日：纪念日", timeline)
         self.assertNotIn("穿搭风格", timeline)
         self.assertIn("穿搭风格：日常休闲风", outfit)
         self.assertIn("今日主题：日常", outfit)
         self.assertIn("今日心情：平静", outfit)
         self.assertNotIn("24 小时时间轴", outfit)
+
+    def test_timeline_fallback_without_stage_is_explicit(self):
+        timeline = format_timeline(
+            self.plan,
+            datetime(2026, 7, 14, 9, 0, tzinfo=self.tz),
+            {"stage": None, "active_periods": [], "holidays": []},
+        )
+        self.assertIn("当前大时间段：暂无当前阶段", timeline)
 
 
 if __name__ == "__main__":

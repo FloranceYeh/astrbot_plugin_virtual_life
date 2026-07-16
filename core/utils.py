@@ -106,9 +106,34 @@ def format_plan(plan: DailyPlan, moment: datetime | None = None) -> str:
     return "\n".join(lines)
 
 
-def format_timeline(plan: DailyPlan, moment: datetime | None = None) -> str:
+def format_timeline(
+    plan: DailyPlan,
+    moment: datetime | None = None,
+    long_term_day: dict[str, object] | None = None,
+) -> str:
     current = timeline_item_at(plan, moment) if moment else None
-    lines = [f"📅 {plan.date} 虚拟日程"]
+    stage = long_term_day.get("stage") if long_term_day else None
+    active_periods = long_term_day.get("active_periods", []) if long_term_day else []
+    holidays = long_term_day.get("holidays", []) if long_term_day else []
+    lines = [
+        f"📅 {plan.date} 虚拟日程",
+        f"💡 今日主题：{plan.theme}",
+        f"💭 心情状态：{plan.mood}",
+    ]
+    if isinstance(stage, dict):
+        lines.append(
+            f"🗓️ 当前大时间段：{stage['name']}（{stage['start_date']} 至 {stage['end_date']}）"
+        )
+    else:
+        lines.append("🗓️ 当前大时间段：暂无当前阶段")
+    for period in active_periods:
+        constraints = "；".join(period.get("constraints", []))
+        lines.append(
+            f"⚠️ 特殊时间段：{period['name']}（{period['start_date']} 至 {period['end_date']}）"
+            + (f" · {constraints}" if constraints else "")
+        )
+    if holidays:
+        lines.append("🎉 今日节日：" + "、".join(item["name"] for item in holidays))
     if current:
         location = f" @ {current.location}" if current.location else ""
         lines.append(f"📍 当前时段：{current.start}-{current.end} {current.activity}{location}")

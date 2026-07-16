@@ -114,12 +114,33 @@
             </div>
           </section>
         {% elif view == "timeline" %}
-          {% if current_item %}
-            <div class="summary-card">
-              <div class="label">当前日期所处时间段 · {{ current_item.start }}–{{ current_item.end }}</div>
-              <div class="value">{{ current_item.activity }}{% if current_item.location %} · {{ current_item.location }}{% endif %}</div>
-              <div class="detail-meta">状态：{{ current_item.state_label }} · 联系：{{ current_item.availability_label }}</div>
-            </div>
+          <div class="summary-grid" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="summary-card"><div class="label">今日主题</div><div class="value">{{ theme_text }}</div></div>
+            <div class="summary-card"><div class="label">心情状态</div><div class="value">{{ mood }}</div></div>
+          </div>
+          <section class="section">
+            <h2 class="section-title">当前大时间段</h2>
+            {% if current_stage %}
+              <div class="detail-card">
+                <div class="detail-head"><span>{{ current_stage.name }}</span><span>{{ current_stage.kind_label }}</span></div>
+                <div class="detail-meta">{{ current_stage.start_date }} 至 {{ current_stage.end_date }}</div>
+                {% if current_stage.summary %}<div class="stage-summary">{{ current_stage.summary }}</div>{% endif %}
+              </div>
+            {% else %}
+              <div class="empty">暂无当前阶段</div>
+            {% endif %}
+          </section>
+          {% if active_periods %}
+            <section class="section"><h2 class="section-title">今日生效的特殊时间段</h2><div class="cards">
+              {% for item in active_periods %}
+                <div class="detail-card"><div class="detail-head"><span>{{ item.name }}</span><span>{{ item.start_date }} 至 {{ item.end_date }}</span></div>{% if item.constraints_text %}<div class="detail-meta">约束：{{ item.constraints_text }}</div>{% endif %}</div>
+              {% endfor %}
+            </div></section>
+          {% endif %}
+          {% if today_holidays %}
+            <section class="section"><h2 class="section-title">今日节日</h2><div class="cards">
+              {% for item in today_holidays %}<div class="detail-card"><div class="detail-head"><span>{{ item.name }}</span><span>{{ item.kind_label }}</span></div></div>{% endfor %}
+            </div></section>
           {% endif %}
           <section class="section">
             <h2 class="section-title">24 小时时间轴</h2>

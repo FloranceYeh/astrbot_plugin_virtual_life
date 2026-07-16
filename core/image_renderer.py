@@ -93,7 +93,12 @@ class ScheduleImageRenderer:
             except OSError:
                 continue
 
-    async def render_timeline(self, plan: DailyPlan, now: datetime) -> str:
+    async def render_timeline(
+        self,
+        plan: DailyPlan,
+        now: datetime,
+        long_term_day: dict[str, Any] | None = None,
+    ) -> str:
         items = []
         current_minute = now.hour * 60 + now.minute
         same_day = plan.date == now.date().isoformat()
@@ -118,6 +123,9 @@ class ScheduleImageRenderer:
             for window in plan.proactive_windows
         ]
         current = timeline_item_at(plan, now) if same_day else None
+        stage = long_term_day.get("stage") if long_term_day else None
+        active_periods = long_term_day.get("active_periods", []) if long_term_day else []
+        today_holidays = long_term_day.get("holidays", []) if long_term_day else []
         data = self._base_data(
             "timeline",
             plan.persona_id,
@@ -125,14 +133,31 @@ class ScheduleImageRenderer:
                 "title": f"{plan.date} 虚拟日程",
                 "subtitle": plan.persona_id,
                 "status_label": f"当前时段 {current.start}–{current.end}" if current else "非今日计划",
-                "current_item": {
-                    "start": current.start,
-                    "end": current.end,
-                    "activity": current.activity,
-                    "location": current.location,
-                    "state_label": STATE_LABELS.get(current.state, current.state),
-                    "availability_label": AVAILABILITY_LABELS.get(current.availability, current.availability),
-                } if current else None,
+                "theme_text": plan.theme,
+                "mood": plan.mood,
+                "current_stage": {
+                    "name": stage["name"],
+                    "kind_label": KIND_LABELS.get(stage["kind"], stage["kind"]),
+                    "start_date": stage["start_date"],
+                    "end_date": stage["end_date"],
+                    "summary": stage.get("summary", ""),
+                } if isinstance(stage, dict) else None,
+                "active_periods": [
+                    {
+                        "name": period["name"],
+                        "start_date": period["start_date"],
+                        "end_date": period["end_date"],
+                        "constraints_text": "；".join(period.get("constraints", [])),
+                    }
+                    for period in active_periods
+                ],
+                "today_holidays": [
+                    {
+                        "name": holiday["name"],
+                        "kind_label": "传统节日" if holiday.get("kind") == "traditional" else "法定节日",
+                    }
+                    for holiday in today_holidays
+                ],
                 "items": items,
                 "windows": windows,
                 "generated_at": now.strftime("%Y-%m-%d %H:%M"),

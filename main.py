@@ -665,12 +665,18 @@ class ProactiveVirtualDailyPlugin(Star):
             yield event.plain_result("今日暂无可用日程。")
             return
         now = self._now()
-        fallback = format_timeline(plan, now)
+        target = date.fromisoformat(plan.date)
+        long_term_day = self.long_term.expand_day(persona.id, target) or {
+            "stage": None,
+            "active_periods": [],
+            "holidays": self.long_term.holidays.on(target),
+        }
+        fallback = format_timeline(plan, now, long_term_day)
         results = await self._image_view_results(
             event,
             f"{persona.id} · {plan.date} 虚拟日程",
             fallback,
-            [lambda: self.image_renderer.render_timeline(plan, now)],
+            [lambda: self.image_renderer.render_timeline(plan, now, long_term_day)],
         )
         for result in results:
             yield result
