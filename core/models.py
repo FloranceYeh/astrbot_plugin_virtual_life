@@ -113,6 +113,8 @@ class ProactiveWindow:
         parse_hhmm(self.at)
         if self.audience not in AUDIENCES:
             raise ValueError(f"invalid audience: {self.audience}")
+        if not self.source_item_id:
+            raise ValueError("window source_item_id is required")
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> ProactiveWindow:
@@ -222,8 +224,12 @@ class DailyPlan:
                 if window.id in window_ids:
                     raise ValueError("window ids must be unique")
                 window_ids.add(window.id)
-                if window.source_item_id and window.source_item_id not in ids:
+                source = next((item for item in self.timeline if item.id == window.source_item_id), None)
+                if source is None:
                     raise ValueError("window references unknown timeline item")
+                planned = minute_of_day(window.at)
+                if not minute_of_day(source.start) <= planned < minute_of_day(source.end):
+                    raise ValueError("window time must be inside its source timeline item")
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> DailyPlan:

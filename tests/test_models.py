@@ -68,6 +68,18 @@ class ModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             DailyPlan.from_dict(payload)
 
+    def test_window_outside_source_timeline_item_is_rejected(self):
+        payload = valid_payload()
+        payload["proactive_windows"][0]["at"] = "06:59"
+        with self.assertRaisesRegex(ValueError, "inside"):
+            DailyPlan.from_dict(payload)
+
+    def test_window_without_source_is_rejected(self):
+        payload = valid_payload()
+        payload["proactive_windows"][0].pop("source_item_id")
+        with self.assertRaisesRegex(ValueError, "source_item_id"):
+            DailyPlan.from_dict(payload)
+
 
 if __name__ == "__main__":
     unittest.main()
