@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="Virtual Life Logo" width="180" />
+  <img src="logo-large.png" alt="Virtual Life Logo" width="180" />
 </p>
 
 <h1 align="center">虚拟人生（Virtual Life）</h1>
