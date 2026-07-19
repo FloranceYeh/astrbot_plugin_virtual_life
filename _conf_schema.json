@@ -7,7 +7,7 @@
         "description": "生成时间",
         "type": "string",
         "hint": "每天生成日程的时间，格式为 HH:MM。",
-        "default": "07:00"
+        "default": "00:00"
       },
       "schedule_llm_provider": {
         "description": "日程模型",
@@ -51,7 +51,7 @@
         "description": "日程提示模板",
         "type": "text",
         "hint": "可使用 {date}、{weekday}、{holiday}、{persona}、{theme}、{mood}、{outfit_style}。",
-        "default": "你正在为自己规划虚拟的一天。\n日期：{date} {weekday}\n节假日：{holiday}\n人格设定：\n{persona}\n\n创意约束：\n- 主题：{theme}\n- 心情：{mood}\n- 穿搭风格：{outfit_style}\n\n只输出 JSON 对象，不要 Markdown。字段必须包含 date、theme、mood、outfit、timeline、proactive_windows、budget_bonus。outfit 必须是对象，包含值为 {outfit_style} 的 style、非空 summary 和 items 数组；items 每项包含 category、name、details。timeline 每项包含 id、start、end、activity、location、state、availability；state 只能是 sleep/busy/focus/transit/available/social，availability 只能是 blocked/low/normal/high。proactive_windows 每项包含 id、at、intent、audience、source_item_id；audience 只能是 private/group/both。budget_bonus 包含 private 和 group 整数。时间均为 HH:MM，日程必须覆盖完整一天且不可重叠。"
+        "default": "你正在为自己规划虚拟的一天。\n日期：{date} {weekday}\n节假日：{holiday}\n人格设定：\n{persona}\n\n创意约束：\n- 主题：{theme}\n- 心情：{mood}\n- 穿搭风格：{outfit_style}\n\n只输出 JSON 对象，不要 Markdown。字段必须包含 date、theme、mood、outfit、timeline、proactive_windows、budget_bonus。outfit 必须是对象，包含值为 {outfit_style} 的 style、非空 summary 和 items 数组；items 每项包含 category、name、details。timeline 每项包含 id、start、end、activity、location、state、availability；state 只能是 sleep/busy/focus/transit/available/social，availability 只能是 blocked/low/normal/high。proactive_windows 每项包含 id、at、intent、audience、source_item_id；proactive_windows.intent 是内部剧情行为提示，描述角色因关联活动产生的情绪、联想或交流冲动；audience 只能是 private/group/both。budget_bonus 包含 private 和 group 整数。时间均为 HH:MM，日程必须覆盖完整一天且不可重叠。"
       }
     }
   },
@@ -101,7 +101,9 @@
           "精致约会风",
           "运动活力风",
           "复古文艺风",
-          "极简都市风"
+          "极简都市风",
+          "性感御姐风",
+          "可爱甜美风"
         ]
       }
     }
@@ -203,7 +205,8 @@
           "搭配",
           "发型",
           "妆容",
-          "好看"
+          "好看",
+          "ootd"
         ]
       },
       "underwear_keywords": {
@@ -223,6 +226,7 @@
         "hint": "命中后注入当前时间、活动、地点、状态、主题、心情、当前时段和下一项；为空时不触发此模块。",
         "default": [
           "在干嘛",
+          "在干什么",
           "忙吗",
           "有空",
           "几点",
