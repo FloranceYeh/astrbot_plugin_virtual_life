@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+from dataclasses import replace
 from datetime import date
 
 import holidays
@@ -9,7 +10,7 @@ import holidays
 from astrbot.api import logger
 
 from .long_term import validate_stage_bundle
-from .models import DailyPlan, Outfit
+from .models import DailyPlan, Outfit, ProactiveWindow, TimelineItem
 from .persona import PersonaContext
 from .utils import extract_json_object
 
@@ -28,7 +29,9 @@ class DailyPlanGenerator:
 
     @staticmethod
     def _pick(values: object, fallback: str) -> str:
-        candidates = [str(value) for value in values] if isinstance(values, list) else []
+        candidates = (
+            [str(value) for value in values] if isinstance(values, list) else []
+        )
         return random.choice(candidates) if candidates else fallback
 
     def _holiday(self, target: date) -> str:
@@ -45,61 +48,37 @@ class DailyPlanGenerator:
         history_plans: list[DailyPlan] | None = None,
         long_term_context: str = "",
     ) -> DailyPlan:
-        key = f"{target.isoformat()}::{persona.id}"
-        if key in self.generating:
-            raise RuntimeError("plan generation already running")
-        self.generating.add(key)
+        """Generate a complete plan from the combined schedule and outfit prompts.
+
+        Args:
+            target: Date to generate.
+            persona: Persona used to guide the plan.
+            extra: Optional administrator requirements.
+            history_plans: Recent plans used to reduce repetition.
+            long_term_context: Optional long-term stage constraints.
+
+        Returns:
+            A complete validated plan, or a failed placeholder after all retries.
+        """
+        pool = self._pool()
+        theme = self._pick(pool.get("themes"), "日常日")
+        mood = self._pick(pool.get("moods"), "平静")
+        outfit_style = self._pick(pool.get("outfit_styles"), "日常休闲风")
         try:
-            pool = self._pool()
-            theme = self._pick(pool.get("themes"), "日常日")
-            mood = self._pick(pool.get("moods"), "平静")
-            outfit_style = self._pick(pool.get("outfit_styles"), "日常休闲风")
-            prompt_template = str(self._settings().get("prompt_template", ""))
-            prompt = prompt_template.format(
-                date=target.isoformat(),
-                weekday="星期" + "一二三四五六日"[target.weekday()],
-                holiday=self._holiday(target),
-                persona=persona.prompt,
+            return await self._generate_plan(
+                target,
+                persona,
+                mode="完整生成",
+                include_schedule=True,
+                include_outfit=True,
                 theme=theme,
                 mood=mood,
                 outfit_style=outfit_style,
+                history=self._format_history(history_plans or []),
+                long_term_context=long_term_context,
+                requirements=extra,
             )
-            prompt += self._format_history(history_plans or [])
-            if long_term_context:
-                prompt += "\n\n" + long_term_context
-            if extra:
-                prompt += f"\n\n管理员补充要求（最高优先级）：{extra}"
-
-            attempts = max(1, int(self._settings().get("generation_retries", 1)) + 1)
-            last_error = ""
-            for attempt in range(attempts):
-                try:
-                    raw = await self._call_llm(
-                        prompt,
-                        f"proactive_daily_{persona.id}_{target.isoformat()}",
-                    )
-                    payload = extract_json_object(raw)
-                    payload["date"] = target.isoformat()
-                    payload["persona_id"] = persona.id
-                    outfit = payload.get("outfit")
-                    if isinstance(outfit, dict):
-                        outfit["style"] = outfit_style
-                    payload["revision"] = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
-                    return DailyPlan.from_dict(payload)
-                except Exception as exc:
-                    last_error = str(exc)
-                    logger.warning(
-                        "[虚拟人生] 日程生成校验失败 persona=%s attempt=%s: %s",
-                        persona.id,
-                        attempt + 1,
-                        exc,
-                    )
-                    prompt += (
-                        "\n\n上一次输出无效："
-                        + last_error
-                        + "。请重新输出完整 JSON，确保结构化穿搭满足全部分类组合规则，"
-                        "并确保时间线从 00:00 连续覆盖到 24:00、无重叠且引用 ID 有效。"
-                    )
+        except RuntimeError as exc:
             return DailyPlan(
                 date=target.isoformat(),
                 persona_id=persona.id,
@@ -108,10 +87,289 @@ class DailyPlanGenerator:
                 outfit=Outfit(summary="未知", items=(), style="未知"),
                 timeline=(),
                 status="failed",
-                revision=hashlib.sha1(last_error.encode("utf-8")).hexdigest()[:12],
+                revision=hashlib.sha1(str(exc).encode("utf-8")).hexdigest()[:12],
             )
+
+    async def rewrite_schedule(
+        self,
+        plan: DailyPlan,
+        persona: PersonaContext,
+        *,
+        extra: str = "",
+        long_term_context: str = "",
+    ) -> DailyPlan:
+        """Rewrite timeline-related fields while preserving plan identity and outfit.
+
+        Args:
+            plan: Existing valid daily plan.
+            persona: Persona used to guide the rewritten activities.
+            extra: Optional administrator requirements for the timeline.
+            long_term_context: Optional long-term stage constraints.
+
+        Returns:
+            A validated plan with a new timeline, windows, budget, and revision.
+
+        Raises:
+            RuntimeError: If generation is already running or every attempt fails.
+        """
+        outfit_context, timeline = self._format_plan_context(plan)
+        return await self._generate_plan(
+            date.fromisoformat(plan.date),
+            persona,
+            mode="重写日程",
+            include_schedule=True,
+            include_outfit=False,
+            theme=plan.theme,
+            mood=plan.mood,
+            outfit_style=plan.outfit.style,
+            base_plan=plan,
+            history=self._format_history([plan]),
+            long_term_context=long_term_context,
+            outfit_context=outfit_context,
+            timeline=timeline,
+            requirements=extra,
+        )
+
+    async def rewrite_outfit(
+        self,
+        plan: DailyPlan,
+        persona: PersonaContext,
+        *,
+        extra: str = "",
+    ) -> DailyPlan:
+        """Rewrite only the outfit while preserving all schedule-related fields.
+
+        Args:
+            plan: Existing valid daily plan.
+            persona: Persona used to guide the rewritten outfit.
+            extra: Optional administrator requirements for the outfit.
+
+        Returns:
+            A validated plan with a new outfit and revision.
+
+        Raises:
+            RuntimeError: If generation is already running or every attempt fails.
+        """
+        raw_styles = self._pool().get("outfit_styles")
+        styles = (
+            [str(value).strip() for value in raw_styles]
+            if isinstance(raw_styles, list)
+            else []
+        )
+        styles = [value for value in styles if value]
+        explicitly_requested = next((style for style in styles if style in extra), None)
+        alternatives = [style for style in styles if style != plan.outfit.style]
+        outfit_style = explicitly_requested or self._pick(
+            alternatives,
+            plan.outfit.style or "日常休闲风",
+        )
+        outfit_context, timeline = self._format_plan_context(plan)
+        return await self._generate_plan(
+            date.fromisoformat(plan.date),
+            persona,
+            mode="重写穿搭",
+            include_schedule=False,
+            include_outfit=True,
+            theme=plan.theme,
+            mood=plan.mood,
+            outfit_style=outfit_style,
+            base_plan=plan,
+            outfit_context=outfit_context,
+            timeline=timeline,
+            requirements=extra,
+        )
+
+    async def _generate_plan(
+        self,
+        target: date,
+        persona: PersonaContext,
+        *,
+        mode: str,
+        include_schedule: bool,
+        include_outfit: bool,
+        theme: str,
+        mood: str,
+        outfit_style: str,
+        base_plan: DailyPlan | None = None,
+        history: str = "",
+        long_term_context: str = "",
+        outfit_context: str = "",
+        timeline: str = "",
+        requirements: str = "",
+    ) -> DailyPlan:
+        """Generate and validate a full plan or selected plan components.
+
+        Args:
+            target: Date being generated.
+            persona: Persona used to guide generation.
+            mode: Human-readable operation name exposed to prompt templates.
+            include_schedule: Whether schedule prompt and fields are included.
+            include_outfit: Whether outfit prompt and field are included.
+            theme: Selected or preserved theme.
+            mood: Selected or preserved mood.
+            outfit_style: Selected or preserved outfit style.
+            base_plan: Existing plan used for a partial rewrite.
+            history: Formatted recent or current plan context.
+            long_term_context: Formatted long-term stage context.
+            outfit_context: Formatted existing outfit context.
+            timeline: Formatted existing timeline context.
+            requirements: Optional administrator requirements.
+
+        Returns:
+            A validated complete or partially replaced plan.
+
+        Raises:
+            RuntimeError: If generation is concurrent, misconfigured, or invalid after retries.
+        """
+        key = f"{target.isoformat()}::{persona.id}"
+        if key in self.generating:
+            raise RuntimeError("plan generation already running")
+        self.generating.add(key)
+        try:
+            settings = self._settings()
+            variables = {
+                "mode": mode,
+                "date": target.isoformat(),
+                "weekday": "星期" + "一二三四五六日"[target.weekday()],
+                "holiday": self._holiday(target),
+                "persona": persona.prompt,
+                "theme": theme,
+                "mood": mood,
+                "outfit_style": outfit_style,
+                "history": history or "无",
+                "long_term_context": long_term_context or "无",
+                "outfit_context": outfit_context or "无",
+                "timeline": timeline or "无",
+                "current_outfit": outfit_context or "无",
+                "requirements": requirements or "无",
+            }
+            components = []
+            if include_schedule:
+                components.append("schedule")
+            if include_outfit:
+                components.append("outfit")
+            system_prompts = [
+                str(
+                    settings.get(f"{component}_generation_system_prompt", "") or ""
+                ).strip()
+                for component in components
+            ]
+            prompt_templates = [
+                str(settings.get(f"{component}_prompt_template", "") or "").strip()
+                for component in components
+            ]
+            if any(not value for value in system_prompts + prompt_templates):
+                raise RuntimeError("schedule or outfit generation prompt is empty")
+            system_prompt = "\n\n".join(system_prompts)
+            prompt = "\n\n".join(
+                template.format(**variables) for template in prompt_templates
+            )
+
+            attempts = max(1, int(settings.get("generation_retries", 1)) + 1)
+            last_error = ""
+            for attempt in range(attempts):
+                try:
+                    raw = await self._call_llm_with_system(
+                        prompt,
+                        f"daily_{'_'.join(components)}_{persona.id}_{target.isoformat()}",
+                        system_prompt,
+                    )
+                    payload = extract_json_object(raw)
+                    raw_timeline: list[dict] = []
+                    raw_windows: list[dict] = []
+                    bonus: dict = {}
+                    if include_schedule:
+                        for required in (
+                            "timeline",
+                            "proactive_windows",
+                            "budget_bonus",
+                        ):
+                            if required not in payload:
+                                raise ValueError(f"missing schedule field: {required}")
+                        raw_timeline = payload["timeline"]
+                        raw_windows = payload["proactive_windows"]
+                        bonus = payload["budget_bonus"]
+                        if not isinstance(raw_timeline, list) or not all(
+                            isinstance(item, dict) for item in raw_timeline
+                        ):
+                            raise ValueError("timeline must be an array of objects")
+                        if not isinstance(raw_windows, list) or not all(
+                            isinstance(item, dict) for item in raw_windows
+                        ):
+                            raise ValueError(
+                                "proactive_windows must be an array of objects"
+                            )
+                        if not isinstance(bonus, dict):
+                            raise ValueError("budget_bonus must be an object")
+                    outfit: dict | None = None
+                    if include_outfit:
+                        outfit = payload.get("outfit")
+                        if not isinstance(outfit, dict):
+                            raise ValueError("missing structured outfit")
+                        outfit["style"] = outfit_style
+                    revision = hashlib.sha1(
+                        f"{base_plan.revision if base_plan else ''}\n{mode}\n{raw}".encode()
+                    ).hexdigest()[:12]
+                    if base_plan is None:
+                        payload["date"] = target.isoformat()
+                        payload["persona_id"] = persona.id
+                        payload["theme"] = theme
+                        payload["mood"] = mood
+                        payload["revision"] = revision
+                        return DailyPlan.from_dict(payload)
+
+                    rewritten = base_plan
+                    if include_schedule:
+                        rewritten = replace(
+                            rewritten,
+                            timeline=tuple(
+                                TimelineItem.from_dict(item) for item in raw_timeline
+                            ),
+                            proactive_windows=tuple(
+                                ProactiveWindow.from_dict(item) for item in raw_windows
+                            ),
+                            private_bonus=int(bonus.get("private", 0)),
+                            group_bonus=int(bonus.get("group", 0)),
+                        )
+                    if include_outfit:
+                        rewritten = replace(rewritten, outfit=Outfit.from_dict(outfit))
+                    return replace(rewritten, revision=revision)
+                except Exception as exc:
+                    last_error = str(exc)
+                    logger.warning(
+                        "[Virtual Life] Plan generation validation failed mode=%s persona=%s attempt=%s: %s",
+                        mode,
+                        persona.id,
+                        attempt + 1,
+                        exc,
+                    )
+                    prompt += f"\n\n上一次输出无效：{last_error}。请修正错误并重新输出完整 JSON 对象。"
+            raise RuntimeError(last_error or "plan generation failed")
         finally:
             self.generating.discard(key)
+
+    @staticmethod
+    def _format_plan_context(plan: DailyPlan) -> tuple[str, str]:
+        """Format outfit and timeline context for configurable prompt templates.
+
+        Args:
+            plan: Plan whose preserved context should be described.
+
+        Returns:
+            Outfit context followed by timeline context.
+        """
+        outfit_items = "；".join(
+            f"{item.category}={item.name}"
+            + (f"（{item.details}）" if item.details else "")
+            for item in plan.outfit.items
+        )
+        outfit_context = f"{plan.outfit.style}｜{plan.outfit.summary}｜{outfit_items}"
+        timeline = "；".join(
+            f"{item.start}-{item.end} {item.activity}"
+            + (f" @ {item.location}" if item.location else "")
+            for item in plan.timeline
+        )
+        return outfit_context, timeline
 
     @staticmethod
     def _format_history(plans: list[DailyPlan]) -> str:
@@ -119,10 +377,7 @@ class DailyPlanGenerator:
             return "\n\n近期同人格日程：无。"
         blocks = []
         for plan in plans:
-            activities = "；".join(
-                f"{item.start}-{item.end} {item.activity}"
-                for item in plan.timeline
-            )
+            _, activities = DailyPlanGenerator._format_plan_context(plan)
             blocks.append(
                 f"- {plan.date}｜主题：{plan.theme}｜心情：{plan.mood}｜"
                 f"穿搭风格：{plan.outfit.style}｜穿搭：{plan.outfit.summary}｜活动：{activities}"
@@ -132,32 +387,6 @@ class DailyPlanGenerator:
             + "\n".join(blocks)
             + "\n新日程可以延续尚未完成的兴趣或状态，但不要照抄相同主题、穿搭和活动组合。"
         )
-
-    async def _call_llm(self, prompt: str, session_id: str) -> str:
-        provider_id = str(self._settings().get("schedule_llm_provider") or "").strip()
-        provider = self.context.get_provider_by_id(provider_id) if provider_id else None
-        provider = provider or self.context.get_using_provider()
-        if not provider:
-            raise RuntimeError("no LLM provider available")
-        system_prompt = str(self._settings().get("generation_system_prompt", "") or "").strip()
-        outfit_contract = (
-            "outfit 必须是 JSON 对象，包含非空 summary 和 items 数组。items 每项必须包含 category、name、details；"
-            "category 只能是 hairstyle、headwear、underwear、top、bottom、dress、legwear、outerwear、shoes、"
-            "accessory、bag、makeup、fragrance、other。name 必须非空，details 必须是字符串。"
-            "items 必须至少包含 hairstyle、underwear、shoes，并至少包含 top、dress、other 之一；"
-            "如果没有 dress，则必须包含 bottom。没有的可选分类不要输出空对象。禁止把 outfit 输出为字符串。"
-        )
-        system_prompt = f"{system_prompt}\n\n{outfit_contract}" if system_prompt else outfit_contract
-        response = await provider.text_chat(
-            prompt=prompt,
-            session_id=session_id,
-            system_prompt=system_prompt or None,
-        )
-        for key in ("completion_text", "completion", "text", "content"):
-            value = getattr(response, key, None)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        raise RuntimeError("LLM returned empty completion")
 
     async def generate_long_term_timeline(
         self,
@@ -216,15 +445,21 @@ class DailyPlanGenerator:
             f"long_term_{persona.id}_{start_date.isoformat()}",
             system_prompt,
         )
-        return validate_stage_bundle(extract_json_object(raw), persona.id, required_start=start_date)
+        return validate_stage_bundle(
+            extract_json_object(raw), persona.id, required_start=start_date
+        )
 
-    async def _call_llm_with_system(self, prompt: str, session_id: str, system_prompt: str) -> str:
+    async def _call_llm_with_system(
+        self, prompt: str, session_id: str, system_prompt: str
+    ) -> str:
         provider_id = str(self._settings().get("schedule_llm_provider") or "").strip()
         provider = self.context.get_provider_by_id(provider_id) if provider_id else None
         provider = provider or self.context.get_using_provider()
         if not provider:
             raise RuntimeError("no LLM provider available")
-        response = await provider.text_chat(prompt=prompt, session_id=session_id, system_prompt=system_prompt)
+        response = await provider.text_chat(
+            prompt=prompt, session_id=session_id, system_prompt=system_prompt
+        )
         for key in ("completion_text", "completion", "text", "content"):
             value = getattr(response, key, None)
             if isinstance(value, str) and value.strip():

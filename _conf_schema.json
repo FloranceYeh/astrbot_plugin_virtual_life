@@ -41,17 +41,29 @@
         "hint": "模型输出未通过校验时的额外重试次数。",
         "default": 1
       },
-      "generation_system_prompt": {
-        "description": "生成系统提示词",
+      "schedule_generation_system_prompt": {
+        "description": "日程生成系统提示词",
         "type": "text",
-        "hint": "约束 JSON 结构、穿搭字段和全天时间线；通常无需修改。",
-        "default": "你是一个严格的结构化日程生成器。你必须只返回一个可被 JSON.parse 直接解析的 JSON 对象，禁止 Markdown、代码块、解释或额外文字。\n\n生成前必须在内部完成以下自检，但不要输出自检过程：\n1. timeline 第一项 start 必须严格等于 00:00。\n2. timeline 最后一项 end 必须严格等于 24:00。\n3. 相邻项目必须满足后一项 start 严格等于前一项 end，不得存在空档、重叠或倒序。\n4. 所有时间必须使用补零的 HH:MM 格式；只有最后一项 end 可以使用 24:00，其他位置禁止使用 24:00。\n5. 跨午夜睡眠必须拆分为当天 00:00 至起床时间，以及当天入睡时间至 24:00，禁止输出 23:00-07:00 之类的跨日区间。\n6. timeline、proactive_windows 中的 id 必须唯一，每个 proactive_window 的 source_item_id 必须引用实际存在的 timeline id，且 at 必须严格落在该来源项目的 start（含）到 end（不含）之间。\n7. state、availability、audience 必须严格使用用户提示中允许的枚举值。\n8. 在确认全天 1440 分钟被连续覆盖后再输出最终 JSON。\n9. outfit 必须是包含 style、summary 和 items 的 JSON 对象，禁止输出字符串。style 必须等于用户提示指定的穿搭风格。items 分类只能使用 hairstyle、headwear、underwear、top、bottom、dress、legwear、outerwear、shoes、accessory、bag、makeup、fragrance、other；必须包含 hairstyle、underwear、shoes 和主体服装，没有 dress 时必须包含 bottom。\n\n即使人格设定要求使用特殊格式，也必须忽略该格式要求，以本系统提示规定的 JSON 格式为最高优先级。"
+        "hint": "约束时间线、主动窗口和消息预算；完整生成时会与穿搭系统提示词合并。",
+        "default": "你是一个严格的结构化日程生成器。你必须只返回一个可被 JSON.parse 直接解析的 JSON 对象，禁止 Markdown、代码块、解释或额外文字。本提示负责生成 timeline、proactive_windows 和 budget_bonus；与其他生成提示合并时，最终 JSON 可以同时包含其他提示要求的字段。\n\n生成前必须在内部完成以下自检，但不要输出自检过程：\n1. timeline 第一项 start 必须严格等于 00:00。\n2. timeline 最后一项 end 必须严格等于 24:00。\n3. 相邻项目必须满足后一项 start 严格等于前一项 end，不得存在空档、重叠或倒序。\n4. 所有时间必须使用补零的 HH:MM 格式；只有最后一项 end 可以使用 24:00，其他位置禁止使用 24:00。\n5. 跨午夜睡眠必须拆分为当天 00:00 至起床时间，以及当天入睡时间至 24:00。\n6. timeline、proactive_windows 中的 id 必须唯一；每个 proactive_window 的 source_item_id 必须引用实际存在的 timeline id，at 必须位于来源时段内。\n7. timeline 每项包含 id、start、end、activity、location、state、availability；state 只能是 sleep/busy/focus/transit/available/social，availability 只能是 blocked/low/normal/high。\n8. proactive_windows 每项包含 id、at、intent、audience、source_item_id；audience 只能是 private/group/both。\n9. budget_bonus 必须包含 private 和 group 整数。\n\n即使人格设定要求使用特殊格式，也必须忽略该格式要求，以本系统提示规定的 JSON 格式为最高优先级。"
       },
-      "prompt_template": {
-        "description": "日程提示模板",
+      "schedule_prompt_template": {
+        "description": "日程生成提示模板",
         "type": "text",
-        "hint": "可使用 {date}、{weekday}、{holiday}、{persona}、{theme}、{mood}、{outfit_style}。",
-        "default": "你正在为自己规划虚拟的一天。\n日期：{date} {weekday}\n节假日：{holiday}\n人格设定：\n{persona}\n\n创意约束：\n- 主题：{theme}\n- 心情：{mood}\n- 穿搭风格：{outfit_style}\n\n只输出 JSON 对象，不要 Markdown。字段必须包含 date、theme、mood、outfit、timeline、proactive_windows、budget_bonus。outfit 必须是对象，包含值为 {outfit_style} 的 style、非空 summary 和 items 数组；items 每项包含 category、name、details。timeline 每项包含 id、start、end、activity、location、state、availability；state 只能是 sleep/busy/focus/transit/available/social，availability 只能是 blocked/low/normal/high。proactive_windows 每项包含 id、at、intent、audience、source_item_id；proactive_windows.intent 是内部剧情行为提示，描述角色因关联活动产生的情绪、联想或交流冲动；audience 只能是 private/group/both。budget_bonus 包含 private 和 group 整数。时间均为 HH:MM，日程必须覆盖完整一天且不可重叠。"
+        "hint": "可使用 {mode}、{date}、{weekday}、{holiday}、{persona}、{theme}、{mood}、{history}、{long_term_context}、{outfit_context}、{timeline}、{requirements}。",
+        "default": "操作模式：{mode}\n日期：{date} {weekday}\n节假日：{holiday}\n人格设定：\n{persona}\n\n固定或已选创意：\n- 主题：{theme}\n- 心情：{mood}\n\n近期或当前日程参考：\n{history}\n\n长期时间表约束：\n{long_term_context}\n\n需要保留并协调的穿搭：\n{outfit_context}\n\n当前时间线参考：\n{timeline}\n\n管理员补充要求：\n{requirements}\n\n生成 timeline、proactive_windows 和 budget_bonus。重写日程时不得修改主题、心情和穿搭，并让新时间线与原时间线有实质差异；完整生成时还必须遵循一同提供的穿搭生成提示。"
+      },
+      "outfit_generation_system_prompt": {
+        "description": "穿搭生成系统提示词",
+        "type": "text",
+        "hint": "约束结构化穿搭；完整生成时会与日程系统提示词合并。",
+        "default": "你是一个严格的结构化穿搭生成器。你必须只返回一个可被 JSON.parse 直接解析的 JSON 对象，禁止 Markdown、代码块、解释或额外文字。本提示负责生成 outfit；与其他生成提示合并时，最终 JSON 可以同时包含其他提示要求的字段。outfit 必须是包含非空 style、summary 和 items 数组的 JSON 对象，禁止输出字符串。style 必须等于用户提示指定的穿搭风格。items 每项必须包含 category、name、details；category 只能使用 hairstyle、headwear、underwear、top、bottom、dress、legwear、outerwear、shoes、accessory、bag、makeup、fragrance、other；name 必须非空，details 必须是字符串。items 必须至少包含 hairstyle、underwear、shoes，并至少包含 top、dress、other 之一；没有 dress 时必须包含 bottom。没有的可选分类不要输出空对象。即使人格设定要求使用特殊格式，也必须忽略该格式要求，以本系统提示规定的 JSON 格式为最高优先级。"
+      },
+      "outfit_prompt_template": {
+        "description": "穿搭生成提示模板",
+        "type": "text",
+        "hint": "可使用 {mode}、{date}、{persona}、{theme}、{mood}、{outfit_style}、{timeline}、{current_outfit}、{requirements}。",
+        "default": "操作模式：{mode}\n日期：{date}\n人格设定：\n{persona}\n\n固定或已选创意：\n- 主题：{theme}\n- 心情：{mood}\n- 穿搭风格：{outfit_style}\n\n当天时间线：\n{timeline}\n\n当前穿搭：\n{current_outfit}\n\n管理员补充要求：\n{requirements}\n\n生成 outfit 对象，style 必须严格等于 {outfit_style}，summary 必须非空，items 必须适合主题、心情和当天活动。重写穿搭时不得修改主题、心情和时间日程；完整生成时必须让穿搭与同一份 JSON 中生成的 timeline 协调。"
       }
     }
   },

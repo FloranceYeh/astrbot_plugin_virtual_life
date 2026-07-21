@@ -119,14 +119,22 @@ class ProactiveVirtualDailyPlugin(Star):
                 for umo in sessions:
                     await self._schedule_session(umo, persona, plan)
 
-            keep_days = int((self.config.get("schedule_settings", {}) or {}).get("history_days", 14))
-            self.storage.plans = prune_date_keys(self.storage.plans, keep_days, now.date())
+            keep_days = int(
+                (self.config.get("schedule_settings", {}) or {}).get("history_days", 14)
+            )
+            self.storage.plans = prune_date_keys(
+                self.storage.plans, keep_days, now.date()
+            )
             await self.storage.save_plans()
             await self.storage.save_sessions()
 
-    async def _ensure_plan_for_umo(self, umo: str, *, force: bool = False, extra: str = "") -> tuple[PersonaContext, DailyPlan]:
+    async def _ensure_plan_for_umo(
+        self, umo: str, *, force: bool = False, extra: str = ""
+    ) -> tuple[PersonaContext, DailyPlan]:
         persona = await self.personas.resolve(umo)
-        plan = await self._ensure_plan(persona, self._now().date(), force=force, extra=extra)
+        plan = await self._ensure_plan(
+            persona, self._now().date(), force=force, extra=extra
+        )
         return persona, plan
 
     async def _ensure_plan(
@@ -143,7 +151,9 @@ class ProactiveVirtualDailyPlugin(Star):
             return existing
         settings = self.config.get("schedule_settings", {}) or {}
         reference_days = max(0, int(settings.get("reference_history_days", 3)))
-        history_plans = self.storage.get_recent_plans(persona.id, target, reference_days)
+        history_plans = self.storage.get_recent_plans(
+            persona.id, target, reference_days
+        )
         long_term_settings = self.config.get("long_term_settings", {}) or {}
         long_term_context = ""
         if long_term_settings.get("enable", True):
@@ -163,7 +173,24 @@ class ProactiveVirtualDailyPlugin(Star):
         await self.storage.save_plans()
         return plan
 
-    async def _schedule_session(self, umo: str, persona: PersonaContext, plan: DailyPlan) -> None:
+    async def _reschedule_plan_sessions(
+        self, persona: PersonaContext, plan: DailyPlan
+    ) -> None:
+        """Replace scheduled jobs for every subscribed session using this persona.
+
+        Args:
+            persona: Persona shared by the sessions to update.
+            plan: Newly stored plan whose jobs should be scheduled.
+        """
+        for umo in self.policy.enabled_sessions():
+            resolved = await self.personas.resolve(umo)
+            if resolved.id == persona.id:
+                await self._schedule_session(umo, resolved, plan)
+        await self.storage.save_sessions()
+
+    async def _schedule_session(
+        self, umo: str, persona: PersonaContext, plan: DailyPlan
+    ) -> None:
         prefix = f"pvd:{self._umo_hash(umo)}:plan:"
         self.runtime.remove_prefix(prefix)
         now = self._now()
@@ -175,7 +202,9 @@ class ProactiveVirtualDailyPlugin(Star):
                 if not self._window_matches(umo, window):
                     continue
                 run_at = self._at_time(plan.date, window.at) + timedelta(
-                    minutes=proactive_window_offset_minutes(plan, window, jitter_minutes),
+                    minutes=proactive_window_offset_minutes(
+                        plan, window, jitter_minutes
+                    ),
                 )
                 if run_at <= now:
                     continue
@@ -198,20 +227,31 @@ class ProactiveVirtualDailyPlugin(Star):
 
     def _at_time(self, date_str: str, hhmm: str) -> datetime:
         hour, minute = map(int, hhmm.split(":"))
-        return datetime.combine(date.fromisoformat(date_str), time(hour, minute), self.timezone)
+        return datetime.combine(
+            date.fromisoformat(date_str), time(hour, minute), self.timezone
+        )
 
     async def _schedule_sleep_exception(self, umo, persona, plan, state) -> None:
         if state.sleep_drawn:
             return
         state.sleep_drawn = True
-        probability = float((self.config.get("delivery_settings", {}) or {}).get("sleep_exception_probability", 0.08))
-        state.sleep_selected = deterministic_probability(f"sleep::{plan.date}::{umo}") < max(0.0, min(1.0, probability))
+        probability = float(
+            (self.config.get("delivery_settings", {}) or {}).get(
+                "sleep_exception_probability", 0.08
+            )
+        )
+        state.sleep_selected = deterministic_probability(
+            f"sleep::{plan.date}::{umo}"
+        ) < max(0.0, min(1.0, probability))
         if not state.sleep_selected:
             return
         sleep_items = [item for item in plan.timeline if item.state == "sleep"]
         if not sleep_items:
             return
-        item = max(sleep_items, key=lambda value: self._duration_minutes(value.start, value.end))
+        item = max(
+            sleep_items,
+            key=lambda value: self._duration_minutes(value.start, value.end),
+        )
         start = self._at_time(plan.date, item.start)
         end = self._end_time(plan.date, item.end)
         if end <= self._now() or (end - start).total_seconds() < 120:
@@ -241,7 +281,11 @@ class ProactiveVirtualDailyPlugin(Star):
 
     def _end_time(self, date_str: str, hhmm: str) -> datetime:
         if hhmm == "24:00":
-            return datetime.combine(date.fromisoformat(date_str) + timedelta(days=1), time.min, self.timezone)
+            return datetime.combine(
+                date.fromisoformat(date_str) + timedelta(days=1),
+                time.min,
+                self.timezone,
+            )
         return self._at_time(date_str, hhmm)
 
     def _schedule_idle(self, umo: str, *, run_at: datetime | None = None) -> None:
@@ -256,26 +300,39 @@ class ProactiveVirtualDailyPlugin(Star):
             run_at = self._now() + timedelta(minutes=random.randint(minimum, maximum))
         self.runtime.add_date_job(job_id, run_at, self._run_idle, umo)
 
-    async def _run_window(self, umo: str, persona_id: str, revision: str, window_id: str) -> None:
+    async def _run_window(
+        self, umo: str, persona_id: str, revision: str, window_id: str
+    ) -> None:
         persona, plan = await self._ensure_plan_for_umo(umo)
         if persona.id != persona_id or plan.revision != revision:
             await self._schedule_session(umo, persona, plan)
             return
-        window = next((value for value in plan.proactive_windows if value.id == window_id), None)
+        window = next(
+            (value for value in plan.proactive_windows if value.id == window_id), None
+        )
         if not window:
             return
         await self._attempt_window(umo, persona, plan, window, delayed=False)
 
     async def _run_delayed_window(
-        self, umo: str, persona_id: str, revision: str, window_id: str, scheduled_at: str
+        self,
+        umo: str,
+        persona_id: str,
+        revision: str,
+        window_id: str,
+        scheduled_at: str,
     ) -> None:
         persona, plan = await self._ensure_plan_for_umo(umo)
         if persona.id != persona_id or plan.revision != revision:
             return
-        window = next((value for value in plan.proactive_windows if value.id == window_id), None)
+        window = next(
+            (value for value in plan.proactive_windows if value.id == window_id), None
+        )
         if not window:
             return
-        await self._attempt_window(umo, persona, plan, window, delayed=True, attempt_key=scheduled_at)
+        await self._attempt_window(
+            umo, persona, plan, window, delayed=True, attempt_key=scheduled_at
+        )
 
     async def _attempt_window(
         self,
@@ -289,7 +346,9 @@ class ProactiveVirtualDailyPlugin(Star):
     ) -> None:
         intent = window.intent
         if delayed:
-            source = next(item for item in plan.timeline if item.id == window.source_item_id)
+            source = next(
+                item for item in plan.timeline if item.id == window.source_item_id
+            )
             intent = f"延迟的主动消息：原定日程「{source.activity}」已结束。{intent}"
         sent, reason = await self._attempt_unsolicited(
             umo,
@@ -303,7 +362,11 @@ class ProactiveVirtualDailyPlugin(Star):
             self._schedule_window_retry(umo, persona, plan, window)
 
     def _schedule_window_retry(
-        self, umo: str, persona: PersonaContext, plan: DailyPlan, window: ProactiveWindow
+        self,
+        umo: str,
+        persona: PersonaContext,
+        plan: DailyPlan,
+        window: ProactiveWindow,
     ) -> None:
         next_time = next_available_at(plan, self._now())
         if not next_time:
@@ -324,18 +387,24 @@ class ProactiveVirtualDailyPlugin(Star):
         persona, plan = await self._ensure_plan_for_umo(umo)
         if persona.id != persona_id or plan.revision != revision:
             return
-        await self._attempt_unsolicited(umo, persona, plan, "睡梦中醒来、起夜或失眠时忽然想起对方", "sleep")
+        await self._attempt_unsolicited(
+            umo, persona, plan, "睡梦中醒来、起夜或失眠时忽然想起对方", "sleep"
+        )
 
     async def _run_idle(self, umo: str) -> None:
         persona, plan = await self._ensure_plan_for_umo(umo)
-        sent, reason = await self._attempt_unsolicited(umo, persona, plan, "会话已经沉默了一段时间，想自然地重新联系", "idle")
+        sent, reason = await self._attempt_unsolicited(
+            umo, persona, plan, "会话已经沉默了一段时间，想自然地重新联系", "idle"
+        )
         if sent:
             self._schedule_idle(umo)
             return
         if reason in {"sleeping", "availability probability rejected"}:
             next_time = next_available_at(plan, self._now())
             if next_time:
-                self._schedule_idle(umo, run_at=next_time + timedelta(minutes=random.randint(3, 15)))
+                self._schedule_idle(
+                    umo, run_at=next_time + timedelta(minutes=random.randint(3, 15))
+                )
         elif reason in {"cooldown active", "conversation is not idle enough"}:
             self._schedule_idle(umo, run_at=self._now() + timedelta(minutes=30))
 
@@ -417,7 +486,14 @@ class ProactiveVirtualDailyPlugin(Star):
 
     async def _restore_followups(self) -> None:
         now = self._now()
-        grace = max(1, int((self.config.get("followup_settings", {}) or {}).get("misfire_grace_minutes", 30)))
+        grace = max(
+            1,
+            int(
+                (self.config.get("followup_settings", {}) or {}).get(
+                    "misfire_grace_minutes", 30
+                )
+            ),
+        )
         changed = False
         for task in self.storage.followups.values():
             if task.status != "pending":
@@ -427,7 +503,9 @@ class ProactiveVirtualDailyPlugin(Star):
                 task.status = "missed"
                 changed = True
                 continue
-            self._schedule_followup_job(task, max(scheduled, now + timedelta(seconds=2)))
+            self._schedule_followup_job(
+                task, max(scheduled, now + timedelta(seconds=2))
+            )
         if changed:
             await self.storage.save_followups()
 
@@ -435,7 +513,11 @@ class ProactiveVirtualDailyPlugin(Star):
         settings = self.config.get("long_term_settings", {}) or {}
         if not settings.get("enable", True):
             return
-        persona_ids = {str(stage.get("persona_id", "")) for stage in self.long_term.stages if stage.get("persona_id")}
+        persona_ids = {
+            str(stage.get("persona_id", ""))
+            for stage in self.long_term.stages
+            if stage.get("persona_id")
+        }
         for persona_id in persona_ids:
             latest = self.long_term.latest_stage(persona_id)
             if not latest:
@@ -468,10 +550,16 @@ class ProactiveVirtualDailyPlugin(Star):
             await self._notify_admin(
                 target_umo,
                 f"人格 {persona_id} 的大时间表已自动续期："
-                + "、".join(f"{stage['name']}（{stage['start_date']} 至 {stage['end_date']}）" for stage in stages),
+                + "、".join(
+                    f"{stage['name']}（{stage['start_date']} 至 {stage['end_date']}）"
+                    for stage in stages
+                ),
             )
         except Exception as exc:
-            await self._notify_admin(target_umo, f"人格 {persona_id} 的大时间表自动续期失败（第 {attempts} 次）：{exc}")
+            await self._notify_admin(
+                target_umo,
+                f"人格 {persona_id} 的大时间表自动续期失败（第 {attempts} 次）：{exc}",
+            )
             maximum = max(1, int(settings.get("renewal_max_attempts", 6)))
             if attempts >= maximum:
                 return
@@ -490,7 +578,14 @@ class ProactiveVirtualDailyPlugin(Star):
             logger.error("[虚拟人生] 管理员通知发送失败 %s: %s", umo, exc)
 
     def _schedule_followup_job(self, task: FollowupTask, run_at: datetime) -> None:
-        grace = max(1, int((self.config.get("followup_settings", {}) or {}).get("misfire_grace_minutes", 30)))
+        grace = max(
+            1,
+            int(
+                (self.config.get("followup_settings", {}) or {}).get(
+                    "misfire_grace_minutes", 30
+                )
+            ),
+        )
         self.runtime.add_date_job(
             f"pvd:followup:{task.id}",
             run_at,
@@ -499,14 +594,20 @@ class ProactiveVirtualDailyPlugin(Star):
             misfire_grace_time=grace * 60,
         )
 
-    async def _create_followup(self, umo: str, scheduled_at: str, intent: str) -> FollowupTask:
+    async def _create_followup(
+        self, umo: str, scheduled_at: str, intent: str
+    ) -> FollowupTask:
         settings = self.config.get("followup_settings", {}) or {}
         if not settings.get("enable", True):
             raise ValueError("回访功能未启用")
         run_at = parse_datetime(scheduled_at, self.timezone)
         if run_at <= self._now():
             raise ValueError("回访时间必须晚于当前时间")
-        pending = [task for task in self.storage.followups.values() if task.umo == umo and task.status == "pending"]
+        pending = [
+            task
+            for task in self.storage.followups.values()
+            if task.umo == umo and task.status == "pending"
+        ]
         if len(pending) >= max(1, int(settings.get("max_pending_per_session", 10))):
             raise ValueError("当前会话待执行回访数量已达上限")
         persona = await self.personas.resolve(umo)
@@ -532,7 +633,9 @@ class ProactiveVirtualDailyPlugin(Star):
         for attempt in range(3):
             try:
                 persona, plan = await self._ensure_plan_for_umo(task.umo)
-                await self._deliver(task.umo, persona, plan, "用户明确委托的回访：" + task.intent, 0)
+                await self._deliver(
+                    task.umo, persona, plan, "用户明确委托的回访：" + task.intent, 0
+                )
                 task.status = "completed"
                 break
             except Exception as exc:
@@ -555,11 +658,17 @@ class ProactiveVirtualDailyPlugin(Star):
 
     def _pending_followups(self, umo: str) -> list[FollowupTask]:
         return sorted(
-            (task for task in self.storage.followups.values() if task.umo == umo and task.status == "pending"),
+            (
+                task
+                for task in self.storage.followups.values()
+                if task.umo == umo and task.status == "pending"
+            ),
             key=lambda task: task.scheduled_at,
         )
 
-    def _scheduled_proactive_entries(self, umo: str, plan: DailyPlan) -> list[tuple[datetime, str]]:
+    def _scheduled_proactive_entries(
+        self, umo: str, plan: DailyPlan
+    ) -> list[tuple[datetime, str]]:
         job_times = dict(self.runtime.scheduled_jobs())
         umo_hash = self._umo_hash(umo)
         plan_prefix = f"pvd:{umo_hash}:plan:"
@@ -573,19 +682,23 @@ class ProactiveVirtualDailyPlugin(Star):
         for job_id, run_at in job_times.items():
             if not job_id.startswith(plan_prefix):
                 continue
-            suffix = job_id[len(plan_prefix):]
+            suffix = job_id[len(plan_prefix) :]
             if suffix == "sleep":
                 entries.append((run_at, "睡眠异常主动"))
             elif suffix.startswith("window-retry:"):
                 window_id = suffix.removeprefix("window-retry:")
                 window = windows.get(window_id)
                 label = f"延迟窗口 [{window_id}]"
-                entries.append((run_at, label + (f" · {window.intent}" if window else "")))
+                entries.append(
+                    (run_at, label + (f" · {window.intent}" if window else ""))
+                )
             elif suffix.startswith("window:"):
                 window_id = suffix.removeprefix("window:")
                 window = windows.get(window_id)
                 label = f"日程窗口 [{window_id}]"
-                entries.append((run_at, label + (f" · {window.intent}" if window else "")))
+                entries.append(
+                    (run_at, label + (f" · {window.intent}" if window else ""))
+                )
 
         for task in self._pending_followups(umo):
             run_at = job_times.get(
@@ -633,7 +746,9 @@ class ProactiveVirtualDailyPlugin(Star):
         self.image_renderer.invalidate_persona(persona.id)
         return draft
 
-    async def _image_view_results(self, event: AstrMessageEvent, title: str, fallback: str, jobs) -> list:
+    async def _image_view_results(
+        self, event: AstrMessageEvent, title: str, fallback: str, jobs
+    ) -> list:
         if not self.image_renderer.enabled:
             return [event.plain_result(fallback)]
         try:
@@ -641,7 +756,10 @@ class ProactiveVirtualDailyPlugin(Star):
         except Exception:
             logger.exception("[虚拟人生] 图片渲染失败，回退文字输出")
             return [event.plain_result("图片渲染失败，已切换为文字模式。\n" + fallback)]
-        return [event.plain_result(title), *(event.image_result(path) for path in paths)]
+        return [
+            event.plain_result(title),
+            *(event.image_result(path) for path in paths),
+        ]
 
     @staticmethod
     def _parse_long_term_json(content: str, persona_id: str) -> list[dict]:
@@ -671,7 +789,9 @@ class ProactiveVirtualDailyPlugin(Star):
         self._schedule_idle(umo)
 
     @filter.on_llm_request()
-    async def inject_virtual_state(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
+    async def inject_virtual_state(
+        self, event: AstrMessageEvent, req: ProviderRequest
+    ) -> None:
         if not self.smart_context_injector.enabled:
             return
         try:
@@ -701,7 +821,11 @@ class ProactiveVirtualDailyPlugin(Star):
     async def get_virtual_daily_schedule(self, event: AstrMessageEvent) -> str:
         """查询机器人当前人格的完整虚拟日程、穿搭与当前活动。"""
         _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
-        return "今日暂无可用日程。" if plan.status != "ok" else format_plan(plan, self._now())
+        return (
+            "今日暂无可用日程。"
+            if plan.status != "ok"
+            else format_plan(plan, self._now())
+        )
 
     @filter.llm_tool(name="get_long_term_timeline")
     async def get_long_term_timeline(self, event: AstrMessageEvent) -> str:
@@ -711,13 +835,19 @@ class ProactiveVirtualDailyPlugin(Star):
         if not stages:
             return "当前人格没有已批准的大时间表。"
         enriched = [self.long_term.with_holidays(stage) for stage in stages]
-        return json.dumps({"persona_id": persona.id, "stages": enriched}, ensure_ascii=False, indent=2)
+        return json.dumps(
+            {"persona_id": persona.id, "stages": enriched}, ensure_ascii=False, indent=2
+        )
 
     @filter.llm_tool(name="schedule_proactive_followup")
-    async def schedule_proactive_followup(self, event: AstrMessageEvent, scheduled_at: str, intent: str) -> str:
+    async def schedule_proactive_followup(
+        self, event: AstrMessageEvent, scheduled_at: str, intent: str
+    ) -> str:
         """仅在用户明确要求稍后联系、提醒或询问结果时创建一次回访。scheduled_at 必须是明确的 ISO 8601 时间；时间不明确时先询问用户。"""
         try:
-            task = await self._create_followup(event.unified_msg_origin, scheduled_at, intent)
+            task = await self._create_followup(
+                event.unified_msg_origin, scheduled_at, intent
+            )
             return f"已安排回访，任务 ID={task.id}，时间={task.scheduled_at}。"
         except ValueError as exc:
             return f"无法安排回访：{exc}"
@@ -726,12 +856,24 @@ class ProactiveVirtualDailyPlugin(Star):
     async def list_proactive_followups(self, event: AstrMessageEvent) -> str:
         """列出当前会话所有待执行的主动回访任务。"""
         tasks = self._pending_followups(event.unified_msg_origin)
-        return "当前没有待执行回访。" if not tasks else "\n".join(f"{task.id} | {task.scheduled_at} | {task.intent}" for task in tasks)
+        return (
+            "当前没有待执行回访。"
+            if not tasks
+            else "\n".join(
+                f"{task.id} | {task.scheduled_at} | {task.intent}" for task in tasks
+            )
+        )
 
     @filter.llm_tool(name="cancel_proactive_followup")
-    async def cancel_proactive_followup(self, event: AstrMessageEvent, task_id: str) -> str:
+    async def cancel_proactive_followup(
+        self, event: AstrMessageEvent, task_id: str
+    ) -> str:
         """当用户取消请求或已经提前汇报结果时，取消当前会话指定的回访任务。"""
-        return "已取消回访。" if await self._cancel_followup(event.unified_msg_origin, task_id) else "未找到可取消的回访任务。"
+        return (
+            "已取消回访。"
+            if await self._cancel_followup(event.unified_msg_origin, task_id)
+            else "未找到可取消的回访任务。"
+        )
 
     @filter.command_group("虚拟人生")
     def virtual_life_group(self):
@@ -754,9 +896,13 @@ class ProactiveVirtualDailyPlugin(Star):
             await self.storage.save_sessions()
         except Exception as exc:
             logger.warning("[虚拟人生] 订阅后即时调度失败 umo=%s: %s", umo, exc)
-            yield event.plain_result(f"{action}当前{kind}会话，但今日日程调度失败，请检查日志或稍后重试。")
+            yield event.plain_result(
+                f"{action}当前{kind}会话，但今日日程调度失败，请检查日志或稍后重试。"
+            )
             return
-        yield event.plain_result(f"{action}当前{kind}会话，主动消息将在符合日程与发送规则时触发。")
+        yield event.plain_result(
+            f"{action}当前{kind}会话，主动消息将在符合日程与发送规则时触发。"
+        )
 
     @filter.command_group("虚拟日程")
     def virtual_daily_group(self):
@@ -807,13 +953,103 @@ class ProactiveVirtualDailyPlugin(Star):
     @virtual_daily_group.command("重写")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def rewrite_schedule(self, event: AstrMessageEvent, extra: str | None = None):
-        """重新生成今日虚拟日程。"""
-        persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin, force=True, extra=extra or "")
-        for umo in self.policy.enabled_sessions():
-            resolved = await self.personas.resolve(umo)
-            if resolved.id == persona.id:
-                await self._schedule_session(umo, resolved, plan)
-        yield event.plain_result("重写失败，请检查 LLM 输出。" if plan.status != "ok" else format_plan(plan, self._now()))
+        """重新生成今日完整虚拟日程。"""
+        persona, plan = await self._ensure_plan_for_umo(
+            event.unified_msg_origin, force=True, extra=extra or ""
+        )
+        await self._reschedule_plan_sessions(persona, plan)
+        yield event.plain_result(
+            "重写失败，请检查 LLM 输出。"
+            if plan.status != "ok"
+            else format_plan(plan, self._now())
+        )
+
+    @virtual_daily_group.command("重写日程")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def rewrite_daily_timeline(
+        self, event: AstrMessageEvent, extra: str | None = None
+    ):
+        """保留主题、心情与穿搭，只重写今日时间日程。"""
+        persona, current = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        if current.status != "ok":
+            yield event.plain_result(
+                "今日没有可局部重写的有效日程，请先使用“虚拟日程 重写”。"
+            )
+            return
+        long_term_context = ""
+        long_term_settings = self.config.get("long_term_settings", {}) or {}
+        if long_term_settings.get("enable", True):
+            long_term_context = self.long_term.format_day_context(
+                persona.id,
+                date.fromisoformat(current.date),
+                fallback_to_latest=True,
+            )
+        try:
+            plan = await self.plan_generator.rewrite_schedule(
+                current,
+                persona,
+                extra=extra or "",
+                long_term_context=long_term_context,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Virtual Life] Schedule rewrite failed persona=%s: %s", persona.id, exc
+            )
+            yield event.plain_result(
+                "日程重写失败，已保留原日程，请检查 LLM 输出或日志。"
+            )
+            return
+        try:
+            self.storage.plans[self.storage.plan_key(plan.date, persona.id)] = plan
+            await self.storage.save_plans()
+            await self._reschedule_plan_sessions(persona, plan)
+        except Exception as exc:
+            logger.warning(
+                "[Virtual Life] Schedule rewrite persistence failed persona=%s: %s",
+                persona.id,
+                exc,
+            )
+            yield event.plain_result("日程已生成，但保存或调度失败，请检查日志。")
+            return
+        yield event.plain_result(format_plan(plan, self._now()))
+
+    @virtual_daily_group.command("重写穿搭")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def rewrite_daily_outfit(
+        self, event: AstrMessageEvent, extra: str | None = None
+    ):
+        """保留主题、心情与时间日程，只重写今日穿搭。"""
+        persona, current = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        if current.status != "ok":
+            yield event.plain_result(
+                "今日没有可局部重写的有效穿搭，请先使用“虚拟日程 重写”。"
+            )
+            return
+        try:
+            plan = await self.plan_generator.rewrite_outfit(
+                current, persona, extra=extra or ""
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Virtual Life] Outfit rewrite failed persona=%s: %s", persona.id, exc
+            )
+            yield event.plain_result(
+                "穿搭重写失败，已保留原穿搭，请检查 LLM 输出或日志。"
+            )
+            return
+        try:
+            self.storage.plans[self.storage.plan_key(plan.date, persona.id)] = plan
+            await self.storage.save_plans()
+            await self._reschedule_plan_sessions(persona, plan)
+        except Exception as exc:
+            logger.warning(
+                "[Virtual Life] Outfit rewrite persistence failed persona=%s: %s",
+                persona.id,
+                exc,
+            )
+            yield event.plain_result("穿搭已生成，但保存或调度失败，请检查日志。")
+            return
+        yield event.plain_result(format_outfit(plan))
 
     @filter.command_group("大时间表")
     def long_term_group(self):
@@ -822,11 +1058,17 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @long_term_group.command("生成")
     @filter.permission_type(filter.PermissionType.ADMIN)
-    async def long_term_generate(self, event: AstrMessageEvent, requirements: str | None = None):
+    async def long_term_generate(
+        self, event: AstrMessageEvent, requirements: str | None = None
+    ):
         """根据自然语言要求生成追加草稿。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         latest = self.long_term.latest_stage(persona.id)
-        start = date.fromisoformat(latest["end_date"]) + timedelta(days=1) if latest else self._now().date()
+        start = (
+            date.fromisoformat(latest["end_date"]) + timedelta(days=1)
+            if latest
+            else self._now().date()
+        )
         try:
             await self._create_long_term_draft(
                 persona=persona,
@@ -840,7 +1082,9 @@ class ProactiveVirtualDailyPlugin(Star):
         except Exception as exc:
             yield event.plain_result(f"生成草稿失败：{exc}")
             return
-        yield event.plain_result("已生成大时间表草稿，使用 /大时间表 草稿 查看，确认后执行 /大时间表 批准。")
+        yield event.plain_result(
+            "已生成大时间表草稿，使用 /大时间表 草稿 查看，确认后执行 /大时间表 批准。"
+        )
 
     @long_term_group.command("导入")
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -899,17 +1143,24 @@ class ProactiveVirtualDailyPlugin(Star):
         """批准草稿并重新生成今日日程。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         try:
-            approved = await self.long_term.approve_draft(persona.id, event.unified_msg_origin)
+            approved = await self.long_term.approve_draft(
+                persona.id, event.unified_msg_origin
+            )
             self.image_renderer.invalidate_persona(persona.id)
             await self._refresh_persona_daily_plan(persona)
         except Exception as exc:
             yield event.plain_result(f"批准失败：{exc}")
             return
-        yield event.plain_result("大时间表已生效并重生成今日日程：" + "、".join(stage["name"] for stage in approved))
+        yield event.plain_result(
+            "大时间表已生效并重生成今日日程："
+            + "、".join(stage["name"] for stage in approved)
+        )
 
     @long_term_group.command("拒绝")
     @filter.permission_type(filter.PermissionType.ADMIN)
-    async def long_term_reject(self, event: AstrMessageEvent, feedback: str | None = None):
+    async def long_term_reject(
+        self, event: AstrMessageEvent, feedback: str | None = None
+    ):
         """拒绝草稿；提供修改意见时重新生成。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         draft = self.long_term.get_draft(persona.id)
@@ -922,8 +1173,16 @@ class ProactiveVirtualDailyPlugin(Star):
             yield event.plain_result("草稿已拒绝并删除。")
             return
         start = date.fromisoformat(draft["stages"][0]["start_date"])
-        previous = self.long_term.latest_stage(persona.id) if draft.get("mode") == "append" else None
-        requirements = "；".join(part for part in (draft.get("requirements", ""), f"修改意见：{feedback}") if part)
+        previous = (
+            self.long_term.latest_stage(persona.id)
+            if draft.get("mode") == "append"
+            else None
+        )
+        requirements = "；".join(
+            part
+            for part in (draft.get("requirements", ""), f"修改意见：{feedback}")
+            if part
+        )
         try:
             await self._create_long_term_draft(
                 persona=persona,
@@ -948,7 +1207,10 @@ class ProactiveVirtualDailyPlugin(Star):
         if not stages:
             yield event.plain_result("当前人格没有已批准的大时间表。")
             return
-        fallback = "\n".join(f"{stage['id']} | {stage['name']} | {stage['kind']} | {stage['start_date']} 至 {stage['end_date']} | 优先级 {stage['priority']}" for stage in stages)
+        fallback = "\n".join(
+            f"{stage['id']} | {stage['name']} | {stage['kind']} | {stage['start_date']} 至 {stage['end_date']} | 优先级 {stage['priority']}"
+            for stage in stages
+        )
         results = await self._image_view_results(
             event,
             f"{persona.id} · 已批准阶段，共 {len(stages)} 个",
@@ -960,17 +1222,26 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @long_term_group.command("查看")
     @filter.permission_type(filter.PermissionType.ADMIN)
-    async def long_term_view(self, event: AstrMessageEvent, stage_id: str | None = None):
+    async def long_term_view(
+        self, event: AstrMessageEvent, stage_id: str | None = None
+    ):
         """查看阶段；可省略参数或输入阶段 ID、名称及唯一片段。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
-        stage, candidates = self.long_term.resolve_stage(persona.id, self._now().date(), stage_id or "")
+        stage, candidates = self.long_term.resolve_stage(
+            persona.id, self._now().date(), stage_id or ""
+        )
         if not stage:
             if candidates:
                 lines = ["找到多个匹配阶段，请使用完整 ID 或名称："]
-                lines.extend(f"- {item['id']} | {item['name']} | {item['start_date']} 至 {item['end_date']}" for item in candidates)
+                lines.extend(
+                    f"- {item['id']} | {item['name']} | {item['start_date']} 至 {item['end_date']}"
+                    for item in candidates
+                )
                 yield event.plain_result("\n".join(lines))
             elif stage_id:
-                yield event.plain_result("未找到匹配阶段，请先使用 /大时间表 列表 查看可用 ID。")
+                yield event.plain_result(
+                    "未找到匹配阶段，请先使用 /大时间表 列表 查看可用 ID。"
+                )
             else:
                 yield event.plain_result("当前人格没有已批准的大时间表。")
             return
@@ -987,7 +1258,9 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @long_term_group.command("重生成")
     @filter.permission_type(filter.PermissionType.ADMIN)
-    async def long_term_regenerate(self, event: AstrMessageEvent, requirements: str | None = None):
+    async def long_term_regenerate(
+        self, event: AstrMessageEvent, requirements: str | None = None
+    ):
         """重新生成替换全部阶段的草稿。"""
         persona = await self.personas.resolve(event.unified_msg_origin)
         previous = self.long_term.latest_stage(persona.id)
@@ -1004,7 +1277,9 @@ class ProactiveVirtualDailyPlugin(Star):
         except Exception as exc:
             yield event.plain_result(f"重生成草稿失败：{exc}")
             return
-        yield event.plain_result("已生成替换全部阶段的草稿，使用 /大时间表 草稿 查看，批准后才会生效。")
+        yield event.plain_result(
+            "已生成替换全部阶段的草稿，使用 /大时间表 草稿 查看，批准后才会生效。"
+        )
 
     @filter.command_group("主动消息")
     def proactive_group(self):
@@ -1014,7 +1289,9 @@ class ProactiveVirtualDailyPlugin(Star):
     @proactive_group.command("状态")
     async def proactive_status(self, event: AstrMessageEvent):
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
-        state = self.policy.ensure_state(event.unified_msg_origin, persona.id, plan, self._now())
+        state = self.policy.ensure_state(
+            event.unified_msg_origin, persona.id, plan, self._now()
+        )
         pending = len(self._pending_followups(event.unified_msg_origin))
         yield event.plain_result(
             f"人格：{persona.id}\n今日预算：{state.sent_count}/{state.daily_budget}\n"
@@ -1025,7 +1302,9 @@ class ProactiveVirtualDailyPlugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def trigger_now(self, event: AstrMessageEvent):
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
-        await self._deliver(event.unified_msg_origin, persona, plan, "管理员要求立即测试主动消息", 0)
+        await self._deliver(
+            event.unified_msg_origin, persona, plan, "管理员要求立即测试主动消息", 0
+        )
         yield event.plain_result("测试主动消息已发送。")
 
     @proactive_group.command("回访列表")

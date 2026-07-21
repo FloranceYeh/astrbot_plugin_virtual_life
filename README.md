@@ -88,7 +88,7 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 - `smart_context_injection.max_chars`：注入内容总字符上限，默认 `1600`，可设置 `400-8000`
 - `smart_context_injection.long_term_milestone_days`：注入近期里程碑的未来天数，默认 `7`，可设置 `0-90`
 - `smart_context_injection` 直接读取配置中的穿搭、内衣、日程、大时间表、完整日程和完整大时间表关键词列表；列表为空时对应模块不会触发
-- `generation_system_prompt` 会在独立系统消息中强制要求时间线完整覆盖 `00:00-24:00`、无空档和重叠，并要求模型输出前自检
+- `schedule_generation_system_prompt`、`schedule_prompt_template` 控制日程字段生成；`outfit_generation_system_prompt`、`outfit_prompt_template` 控制结构化穿搭生成。完整日程会将两组提示词合并后单次调用，局部重写只使用对应的一组提示词
 - 私聊随机预算：`1-3`，LLM 最多增加 `2`，硬上限 `5`
 - 群聊随机预算：`0-1`，LLM 最多增加 `1`，硬上限 `2`
 - 连续未回复暂停阈值：`3`
@@ -111,7 +111,9 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 
 - `/虚拟日程 查看`：展示今日主题、心情、当前大时间段、今日特殊时间段与节日，并渲染高亮当前活动的 24 小时时间轴
 - `/虚拟日程 穿搭`：渲染今日穿搭风格、主题、心情、造型概述和单品明细
-- `/虚拟日程 重写 [补充要求]`（管理员）
+- `/虚拟日程 重写 [补充要求]`（管理员）：重新生成主题、心情、穿搭和时间日程
+- `/虚拟日程 重写日程 [补充要求]`（管理员）：保留主题、心情和穿搭，仅重写时间线、主动窗口与消息预算
+- `/虚拟日程 重写穿搭 [补充要求]`（管理员）：保留主题、心情和时间日程，仅重写穿搭；补充要求中可指定风格池里的风格
 
 ### 大时间表
 

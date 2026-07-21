@@ -50,7 +50,17 @@ def valid_json():
             "theme": "日常",
             "mood": "平静",
             "outfit": outfit_payload(),
-            "timeline": [{"id": "all", "start": "00:00", "end": "24:00", "activity": "正常生活", "location": "家", "state": "available", "availability": "normal"}],
+            "timeline": [
+                {
+                    "id": "all",
+                    "start": "00:00",
+                    "end": "24:00",
+                    "activity": "正常生活",
+                    "location": "家",
+                    "state": "available",
+                    "availability": "normal",
+                }
+            ],
             "proactive_windows": [],
             "budget_bonus": {"private": 1, "group": 0},
         },
@@ -58,37 +68,186 @@ def valid_json():
     )
 
 
+def existing_plan():
+    return DailyPlan.from_dict(
+        {
+            "date": "2026-07-14",
+            "persona_id": "alice",
+            "theme": "文艺日",
+            "mood": "温柔",
+            "outfit": outfit_payload("复古书卷气造型", "复古文艺风"),
+            "timeline": [
+                {
+                    "id": "old",
+                    "start": "00:00",
+                    "end": "24:00",
+                    "activity": "旧日程",
+                    "location": "家",
+                    "state": "available",
+                    "availability": "normal",
+                }
+            ],
+            "proactive_windows": [],
+            "budget_bonus": {"private": 0, "group": 0},
+            "revision": "old-revision",
+        }
+    )
+
+
+def generator_config(*, retries=0, outfit_styles=None, extra_settings=None):
+    settings = {
+        "generation_retries": retries,
+        "schedule_generation_system_prompt": "SCHEDULE_SYSTEM",
+        "schedule_prompt_template": (
+            "SCHEDULE {mode} {date} {persona} {theme} {mood} {history} "
+            "{long_term_context} {outfit_context} {timeline} {requirements}"
+        ),
+        "outfit_generation_system_prompt": "OUTFIT_SYSTEM",
+        "outfit_prompt_template": (
+            "OUTFIT {mode} {date} {persona} {theme} {mood} {outfit_style} "
+            "{timeline} {current_outfit} {requirements}"
+        ),
+    }
+    settings.update(extra_settings or {})
+    pool = {} if outfit_styles is None else {"outfit_styles": outfit_styles}
+    return {"schedule_settings": settings, "creative_pool": pool}
+
+
 class GeneratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rewrite_schedule_only_replaces_schedule_fields(self):
+        response = json.dumps(
+            {
+                "timeline": [
+                    {
+                        "id": "new",
+                        "start": "00:00",
+                        "end": "24:00",
+                        "activity": "新日程",
+                        "location": "图书馆",
+                        "state": "focus",
+                        "availability": "low",
+                    }
+                ],
+                "proactive_windows": [],
+                "budget_bonus": {"private": 2, "group": 1},
+                "theme": "不应采用",
+                "outfit": outfit_payload("不应采用"),
+            },
+            ensure_ascii=False,
+        )
+        provider = Provider([response])
+        generator = DailyPlanGenerator(
+            Context(provider),
+            generator_config(),
+        )
+        original = existing_plan()
+
+        rewritten = await generator.rewrite_schedule(
+            original,
+            PersonaContext("alice", "persona"),
+            extra="安排阅读",
+            long_term_context="<long_term_timeline>暑假</long_term_timeline>",
+        )
+
+        self.assertEqual(rewritten.theme, original.theme)
+        self.assertEqual(rewritten.mood, original.mood)
+        self.assertEqual(rewritten.outfit, original.outfit)
+        self.assertEqual(rewritten.timeline[0].activity, "新日程")
+        self.assertEqual(rewritten.private_bonus, 2)
+        self.assertNotEqual(rewritten.revision, original.revision)
+        self.assertIn("安排阅读", provider.prompts[0])
+        self.assertIn("暑假", provider.prompts[0])
+        self.assertEqual(provider.system_prompts[0], "SCHEDULE_SYSTEM")
+        self.assertNotIn("OUTFIT_SYSTEM", provider.system_prompts[0])
+
+    async def test_rewrite_outfit_excludes_current_style_and_preserves_schedule(self):
+        response = json.dumps(
+            {"outfit": outfit_payload("清爽学院造型", "模型错误风格")},
+            ensure_ascii=False,
+        )
+        provider = Provider([response])
+        generator = DailyPlanGenerator(
+            Context(provider),
+            generator_config(outfit_styles=["复古文艺风", "可爱甜美风"]),
+        )
+        original = existing_plan()
+
+        rewritten = await generator.rewrite_outfit(
+            original, PersonaContext("alice", "persona")
+        )
+
+        self.assertEqual(rewritten.outfit.style, "可爱甜美风")
+        self.assertEqual(rewritten.outfit.summary, "清爽学院造型")
+        self.assertEqual(rewritten.theme, original.theme)
+        self.assertEqual(rewritten.mood, original.mood)
+        self.assertEqual(rewritten.timeline, original.timeline)
+        self.assertEqual(rewritten.proactive_windows, original.proactive_windows)
+        self.assertEqual(rewritten.private_bonus, original.private_bonus)
+        self.assertIn("旧日程", provider.prompts[0])
+        self.assertEqual(provider.system_prompts[0], "OUTFIT_SYSTEM")
+        self.assertNotIn("SCHEDULE_SYSTEM", provider.system_prompts[0])
+
+    async def test_rewrite_outfit_honors_explicit_configured_style(self):
+        response = json.dumps(
+            {"outfit": outfit_payload("利落通勤造型")}, ensure_ascii=False
+        )
+        provider = Provider([response])
+        generator = DailyPlanGenerator(
+            Context(provider),
+            generator_config(outfit_styles=["复古文艺风", "极简都市风", "可爱甜美风"]),
+        )
+
+        rewritten = await generator.rewrite_outfit(
+            existing_plan(),
+            PersonaContext("alice", "persona"),
+            extra="请穿极简都市风",
+        )
+
+        self.assertEqual(rewritten.outfit.style, "极简都市风")
+        self.assertIn("极简都市风", provider.prompts[0])
+
+    async def test_partial_rewrite_raises_after_invalid_outputs(self):
+        provider = Provider(["bad", "still bad"])
+        generator = DailyPlanGenerator(
+            Context(provider),
+            generator_config(retries=1),
+        )
+
+        with self.assertRaises(RuntimeError):
+            await generator.rewrite_schedule(
+                existing_plan(), PersonaContext("alice", "persona")
+            )
+
+        self.assertEqual(provider.calls, 2)
+
     async def test_invalid_output_retries_then_succeeds(self):
         provider = Provider(["not json", valid_json()])
-        config = {
-            "schedule_settings": {"generation_retries": 1, "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}"},
-            "creative_pool": {},
-        }
+        config = generator_config(retries=1)
         generator = DailyPlanGenerator(Context(provider), config)
-        plan = await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
+        plan = await generator.generate(
+            date(2026, 7, 14), PersonaContext("alice", "persona")
+        )
         self.assertEqual(plan.status, "ok")
         self.assertEqual(plan.persona_id, "alice")
         self.assertEqual(plan.outfit.style, "日常休闲风")
         self.assertEqual(provider.calls, 2)
+        self.assertEqual(provider.system_prompts[0], "SCHEDULE_SYSTEM\n\nOUTFIT_SYSTEM")
+        self.assertIn("SCHEDULE 完整生成", provider.prompts[0])
+        self.assertIn("OUTFIT 完整生成", provider.prompts[0])
 
     async def test_invalid_outputs_create_failed_plan(self):
         provider = Provider(["bad", "still bad"])
-        config = {
-            "schedule_settings": {"generation_retries": 1, "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}"},
-            "creative_pool": {},
-        }
+        config = generator_config(retries=1)
         generator = DailyPlanGenerator(Context(provider), config)
-        plan = await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
+        plan = await generator.generate(
+            date(2026, 7, 14), PersonaContext("alice", "persona")
+        )
         self.assertEqual(plan.status, "failed")
         self.assertEqual(provider.calls, 2)
 
     async def test_history_plans_are_injected_into_prompt(self):
         provider = Provider([valid_json()])
-        config = {
-            "schedule_settings": {"generation_retries": 0, "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}"},
-            "creative_pool": {},
-        }
+        config = generator_config()
         history = DailyPlan.from_dict(
             {
                 "date": "2026-07-13",
@@ -96,7 +255,16 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
                 "theme": "宅家日",
                 "mood": "慵懒",
                 "outfit": outfit_payload("舒适的居家造型"),
-                "timeline": [{"id": "all", "start": "00:00", "end": "24:00", "activity": "在家看书", "state": "available", "availability": "normal"}],
+                "timeline": [
+                    {
+                        "id": "all",
+                        "start": "00:00",
+                        "end": "24:00",
+                        "activity": "在家看书",
+                        "state": "available",
+                        "availability": "normal",
+                    }
+                ],
                 "proactive_windows": [],
                 "budget_bonus": {"private": 0, "group": 0},
             }
@@ -111,19 +279,19 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("在家看书", provider.prompts[0])
         self.assertIn("不要照抄", provider.prompts[0])
 
-    async def test_generation_system_prompt_is_passed_separately(self):
+    async def test_generation_prompts_are_combined(self):
         provider = Provider([valid_json()])
-        config = {
-            "schedule_settings": {
-                "generation_retries": 0,
-                "generation_system_prompt": "严格覆盖 00:00 到 24:00，并在输出前自检。",
-                "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}",
-            },
-            "creative_pool": {},
-        }
+        config = generator_config(
+            extra_settings={
+                "schedule_generation_system_prompt": "严格覆盖 00:00 到 24:00，并在输出前自检。",
+                "outfit_generation_system_prompt": "outfit 必须是 JSON 对象并包含 underwear。",
+            }
+        )
         generator = DailyPlanGenerator(Context(provider), config)
         await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
-        self.assertIn("严格覆盖 00:00 到 24:00，并在输出前自检。", provider.system_prompts[0])
+        self.assertIn(
+            "严格覆盖 00:00 到 24:00，并在输出前自检。", provider.system_prompts[0]
+        )
         self.assertIn("outfit 必须是 JSON 对象", provider.system_prompts[0])
         self.assertIn("underwear", provider.system_prompts[0])
 
@@ -131,16 +299,13 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         default_provider = Provider([])
         selected_provider = Provider([valid_json()])
         context = Context(default_provider, selected_provider=selected_provider)
-        config = {
-            "schedule_settings": {
-                "schedule_llm_provider": "schedule-provider",
-                "generation_retries": 0,
-                "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}",
-            },
-            "creative_pool": {},
-        }
+        config = generator_config(
+            extra_settings={"schedule_llm_provider": "schedule-provider"}
+        )
         generator = DailyPlanGenerator(context, config)
-        plan = await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
+        plan = await generator.generate(
+            date(2026, 7, 14), PersonaContext("alice", "persona")
+        )
         self.assertEqual(plan.status, "ok")
         self.assertEqual(context.requested_provider_ids, ["schedule-provider"])
         self.assertEqual(selected_provider.calls, 1)
@@ -150,16 +315,11 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         default_provider = Provider([valid_json()])
         selected_provider = Provider([])
         context = Context(default_provider, selected_provider=selected_provider)
-        config = {
-            "schedule_settings": {
-                "llm_provider": "legacy-provider",
-                "generation_retries": 0,
-                "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}",
-            },
-            "creative_pool": {},
-        }
+        config = generator_config(extra_settings={"llm_provider": "legacy-provider"})
         generator = DailyPlanGenerator(context, config)
-        plan = await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
+        plan = await generator.generate(
+            date(2026, 7, 14), PersonaContext("alice", "persona")
+        )
         self.assertEqual(plan.status, "ok")
         self.assertEqual(context.requested_provider_ids, [])
         self.assertEqual(default_provider.calls, 1)
@@ -167,13 +327,7 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_long_term_context_is_injected(self):
         provider = Provider([valid_json()])
-        config = {
-            "schedule_settings": {
-                "generation_retries": 0,
-                "prompt_template": "{date} {persona} {theme} {mood} {outfit_style}",
-            },
-            "creative_pool": {},
-        }
+        config = generator_config()
         generator = DailyPlanGenerator(Context(provider), config)
         await generator.generate(
             date(2026, 9, 7),
@@ -222,7 +376,9 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stages[0]["start_date"], "2027-02-20")
         self.assertEqual(stages[0]["priority"], 75)
         self.assertIn("priority", provider.system_prompts[0])
-        self.assertIn("text values such as high, medium, or low", provider.system_prompts[0])
+        self.assertIn(
+            "text values such as high, medium, or low", provider.system_prompts[0]
+        )
         self.assertIn("start and end must be non-empty", provider.system_prompts[0])
         self.assertIn("unique integers from 1 to 7", provider.system_prompts[0])
         self.assertIn("required must be a JSON boolean", provider.system_prompts[0])

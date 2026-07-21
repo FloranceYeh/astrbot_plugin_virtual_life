@@ -13,6 +13,10 @@ class CommandGroupContractTests(unittest.TestCase):
         self.assertIn('@virtual_daily_group.command("查看")', self.source)
         self.assertIn('@virtual_daily_group.command("穿搭")', self.source)
         self.assertIn('@virtual_daily_group.command("重写")', self.source)
+        self.assertIn('@virtual_daily_group.command("重写日程")', self.source)
+        self.assertIn('@virtual_daily_group.command("重写穿搭")', self.source)
+        self.assertIn("self.plan_generator.rewrite_schedule", self.source)
+        self.assertIn("self.plan_generator.rewrite_outfit", self.source)
         self.assertNotIn('@filter.command("查看虚拟日程"', self.source)
         self.assertNotIn('@filter.command("重写虚拟日程"', self.source)
 
@@ -32,7 +36,16 @@ class CommandGroupContractTests(unittest.TestCase):
 
     def test_long_term_commands_share_group(self):
         self.assertIn('@filter.command_group("大时间表")', self.source)
-        for command in ("生成", "导入", "草稿", "批准", "拒绝", "列表", "查看", "重生成"):
+        for command in (
+            "生成",
+            "导入",
+            "草稿",
+            "批准",
+            "拒绝",
+            "列表",
+            "查看",
+            "重生成",
+        ):
             self.assertIn(f'@long_term_group.command("{command}")', self.source)
 
     def test_view_commands_use_image_renderer(self):
@@ -42,7 +55,9 @@ class CommandGroupContractTests(unittest.TestCase):
         self.assertIn("self.long_term.holidays.on", self.source)
         self.assertIn("self.image_renderer.render_stage_list", self.source)
         self.assertIn('status="draft"', self.source)
-        self.assertIn("self.image_renderer.render_stage(stage, persona.id)", self.source)
+        self.assertIn(
+            "self.image_renderer.render_stage(stage, persona.id)", self.source
+        )
         self.assertIn("图片渲染失败，已切换为文字模式", self.source)
 
     def test_groups_and_stage_view_have_navigation_help(self):
@@ -52,12 +67,20 @@ class CommandGroupContractTests(unittest.TestCase):
 
     def test_default_prompt_requires_structured_outfit(self):
         schema = json.loads(Path("_conf_schema.json").read_text(encoding="utf-8"))
-        system_prompt = schema["schedule_settings"]["items"]["generation_system_prompt"]["default"]
-        prompt_template = schema["schedule_settings"]["items"]["prompt_template"]["default"]
-        self.assertIn("outfit 必须是包含 style、summary 和 items 的 JSON 对象", system_prompt)
-        self.assertIn("underwear", system_prompt)
-        self.assertIn("outfit 必须是对象", prompt_template)
-        self.assertIn("style", prompt_template)
+        settings = schema["schedule_settings"]["items"]
+        schedule_system = settings["schedule_generation_system_prompt"]["default"]
+        schedule_template = settings["schedule_prompt_template"]["default"]
+        outfit_system = settings["outfit_generation_system_prompt"]["default"]
+        outfit_template = settings["outfit_prompt_template"]["default"]
+        self.assertIn("timeline 第一项", schedule_system)
+        self.assertIn("{outfit_context}", schedule_template)
+        self.assertIn(
+            "outfit 必须是包含非空 style、summary 和 items 数组", outfit_system
+        )
+        self.assertIn("underwear", outfit_system)
+        self.assertIn("{outfit_style}", outfit_template)
+        self.assertNotIn("generation_system_prompt", settings)
+        self.assertNotIn("prompt_template", settings)
 
 
 if __name__ == "__main__":
