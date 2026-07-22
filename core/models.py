@@ -15,6 +15,7 @@ OUTFIT_CATEGORIES = {
     "hairstyle",
     "headwear",
     "underwear",
+    "underpants",
     "top",
     "bottom",
     "dress",
@@ -31,6 +32,7 @@ OUTFIT_CATEGORY_LABELS = {
     "hairstyle": "发型",
     "headwear": "帽子与发饰",
     "underwear": "内衣与打底",
+    "underpants": "内裤",
     "top": "上装",
     "bottom": "下装",
     "dress": "连衣裙与连体服",
@@ -164,7 +166,9 @@ class Outfit:
             if required not in categories:
                 raise ValueError(f"outfit must contain category: {required}")
         if not categories.intersection({"top", "dress", "other"}):
-            raise ValueError("outfit must contain top, dress, or other as the main clothing")
+            raise ValueError(
+                "outfit must contain top, dress, or other as the main clothing"
+            )
         if "dress" not in categories and "bottom" not in categories:
             raise ValueError("outfit without dress must contain bottom")
 
@@ -209,7 +213,9 @@ class DailyPlan:
         for item in self.timeline:
             start = minute_of_day(item.start)
             if ids and start != previous_end:
-                raise ValueError("timeline items must be continuous and non-overlapping")
+                raise ValueError(
+                    "timeline items must be continuous and non-overlapping"
+                )
             if start < previous_end:
                 raise ValueError("timeline items overlap or are unsorted")
             previous_end = minute_of_day(item.end)
@@ -224,12 +230,25 @@ class DailyPlan:
                 if window.id in window_ids:
                     raise ValueError("window ids must be unique")
                 window_ids.add(window.id)
-                source = next((item for item in self.timeline if item.id == window.source_item_id), None)
+                source = next(
+                    (
+                        item
+                        for item in self.timeline
+                        if item.id == window.source_item_id
+                    ),
+                    None,
+                )
                 if source is None:
                     raise ValueError("window references unknown timeline item")
                 planned = minute_of_day(window.at)
-                if not minute_of_day(source.start) <= planned < minute_of_day(source.end):
-                    raise ValueError("window time must be inside its source timeline item")
+                if (
+                    not minute_of_day(source.start)
+                    <= planned
+                    < minute_of_day(source.end)
+                ):
+                    raise ValueError(
+                        "window time must be inside its source timeline item"
+                    )
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> DailyPlan:
@@ -240,8 +259,13 @@ class DailyPlan:
             theme=str(value.get("theme", "日常")),
             mood=str(value.get("mood", "平静")),
             outfit=Outfit.from_dict(value.get("outfit")),
-            timeline=tuple(TimelineItem.from_dict(item) for item in value.get("timeline", [])),
-            proactive_windows=tuple(ProactiveWindow.from_dict(item) for item in value.get("proactive_windows", [])),
+            timeline=tuple(
+                TimelineItem.from_dict(item) for item in value.get("timeline", [])
+            ),
+            proactive_windows=tuple(
+                ProactiveWindow.from_dict(item)
+                for item in value.get("proactive_windows", [])
+            ),
             private_bonus=int(bonus.get("private", value.get("private_bonus", 0))),
             group_bonus=int(bonus.get("group", value.get("group_bonus", 0))),
             status=str(value.get("status", "ok")),
@@ -250,7 +274,10 @@ class DailyPlan:
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
-        value["budget_bonus"] = {"private": value.pop("private_bonus"), "group": value.pop("group_bonus")}
+        value["budget_bonus"] = {
+            "private": value.pop("private_bonus"),
+            "group": value.pop("group_bonus"),
+        }
         return value
 
 

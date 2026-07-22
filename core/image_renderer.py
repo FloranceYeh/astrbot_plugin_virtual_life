@@ -37,11 +37,20 @@ SOURCE_LABELS = {
     "regenerate": "完整重生成",
     "auto_renewal": "自动续期",
 }
-WEEKDAY_LABELS = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}
+WEEKDAY_LABELS = {
+    1: "周一",
+    2: "周二",
+    3: "周三",
+    4: "周四",
+    5: "周五",
+    6: "周六",
+    7: "周日",
+}
 OUTFIT_CATEGORY_ICONS = {
     "hairstyle": "✦",
     "headwear": "♕",
     "underwear": "◈",
+    "underpants": "◇",
     "top": "▱",
     "bottom": "▽",
     "dress": "♢",
@@ -68,7 +77,10 @@ class ScheduleImageRenderer:
         self.render_html = render_html
         self.settings = settings or {}
         self.cache_dir = data_dir / "image_cache"
-        self.template_path = template_path or Path(__file__).resolve().parent.parent / "templates" / "schedule.html"
+        self.template_path = (
+            template_path
+            or Path(__file__).resolve().parent.parent / "templates" / "schedule.html"
+        )
         self.template = self.template_path.read_text(encoding="utf-8")
 
     @property
@@ -113,7 +125,9 @@ class ScheduleImageRenderer:
                     "location": item.location,
                     "state": item.state,
                     "state_label": STATE_LABELS.get(item.state, item.state),
-                    "availability_label": AVAILABILITY_LABELS.get(item.availability, item.availability),
+                    "availability_label": AVAILABILITY_LABELS.get(
+                        item.availability, item.availability
+                    ),
                     "duration": end_minute - start_minute,
                     "current": same_day and start_minute <= current_minute < end_minute,
                 }
@@ -124,7 +138,9 @@ class ScheduleImageRenderer:
         ]
         current = timeline_item_at(plan, now) if same_day else None
         stage = long_term_day.get("stage") if long_term_day else None
-        active_periods = long_term_day.get("active_periods", []) if long_term_day else []
+        active_periods = (
+            long_term_day.get("active_periods", []) if long_term_day else []
+        )
         today_holidays = long_term_day.get("holidays", []) if long_term_day else []
         data = self._base_data(
             "timeline",
@@ -132,7 +148,9 @@ class ScheduleImageRenderer:
             {
                 "title": f"{plan.date} 虚拟日程",
                 "subtitle": plan.persona_id,
-                "status_label": f"当前时段 {current.start}–{current.end}" if current else "非今日计划",
+                "status_label": f"当前时段 {current.start}–{current.end}"
+                if current
+                else "非今日计划",
                 "theme_text": plan.theme,
                 "mood": plan.mood,
                 "current_stage": {
@@ -141,7 +159,9 @@ class ScheduleImageRenderer:
                     "start_date": stage["start_date"],
                     "end_date": stage["end_date"],
                     "summary": stage.get("summary", ""),
-                } if isinstance(stage, dict) else None,
+                }
+                if isinstance(stage, dict)
+                else None,
                 "active_periods": [
                     {
                         "name": period["name"],
@@ -154,7 +174,9 @@ class ScheduleImageRenderer:
                 "today_holidays": [
                     {
                         "name": holiday["name"],
-                        "kind_label": "传统节日" if holiday.get("kind") == "traditional" else "法定节日",
+                        "kind_label": "传统节日"
+                        if holiday.get("kind") == "traditional"
+                        else "法定节日",
                     }
                     for holiday in today_holidays
                 ],
@@ -163,7 +185,9 @@ class ScheduleImageRenderer:
                 "generated_at": now.strftime("%Y-%m-%d %H:%M"),
             },
         )
-        return await self._render(data, persona_id=plan.persona_id, view="timeline", cache=False)
+        return await self._render(
+            data, persona_id=plan.persona_id, view="timeline", cache=False
+        )
 
     async def render_outfit(self, plan: DailyPlan, now: datetime) -> str:
         outfit_items = [
@@ -190,12 +214,16 @@ class ScheduleImageRenderer:
                 "generated_at": now.strftime("%Y-%m-%d %H:%M"),
             },
         )
-        return await self._render(data, persona_id=plan.persona_id, view="outfit", cache=False)
+        return await self._render(
+            data, persona_id=plan.persona_id, view="outfit", cache=False
+        )
 
     async def render_daily(self, plan: DailyPlan, now: datetime) -> str:
         return await self.render_timeline(plan, now)
 
-    async def render_stage_list(self, stages: list[dict[str, Any]], persona_id: str) -> str:
+    async def render_stage_list(
+        self, stages: list[dict[str, Any]], persona_id: str
+    ) -> str:
         first = min(date.fromisoformat(stage["start_date"]) for stage in stages)
         last = max(date.fromisoformat(stage["end_date"]) for stage in stages)
         total_days = max(1, (last - first).days + 1)
@@ -239,7 +267,10 @@ class ScheduleImageRenderer:
             weekly_rules.append(
                 {
                     **item,
-                    "weekday_text": "、".join(WEEKDAY_LABELS.get(day, str(day)) for day in item.get("weekdays", [])),
+                    "weekday_text": "、".join(
+                        WEEKDAY_LABELS.get(day, str(day))
+                        for day in item.get("weekdays", [])
+                    ),
                     "participants_text": "、".join(item.get("participants", [])),
                 }
             )
@@ -250,7 +281,10 @@ class ScheduleImageRenderer:
         metadata = None
         if draft_metadata:
             metadata = {
-                "source": SOURCE_LABELS.get(str(draft_metadata.get("source", "")), str(draft_metadata.get("source", ""))),
+                "source": SOURCE_LABELS.get(
+                    str(draft_metadata.get("source", "")),
+                    str(draft_metadata.get("source", "")),
+                ),
                 "created_at": str(draft_metadata.get("created_at", "")),
                 "requirements": str(draft_metadata.get("requirements", "")),
             }
@@ -268,9 +302,13 @@ class ScheduleImageRenderer:
             "draft_metadata": metadata,
         }
         data = self._base_data("stage", persona_id, payload)
-        return await self._render(data, persona_id=persona_id, view=f"stage-{status}", cache=True)
+        return await self._render(
+            data, persona_id=persona_id, view=f"stage-{status}", cache=True
+        )
 
-    def _base_data(self, view: str, persona_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _base_data(
+        self, view: str, persona_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         theme = str(self.settings.get("image_theme", "dark")).strip().lower()
         if theme not in {"dark", "light"}:
             theme = "dark"
@@ -286,21 +324,30 @@ class ScheduleImageRenderer:
             "persona_id": persona_id,
             "theme": theme,
             "width": min(2000, max(720, width)),
-            "font_stack": font_stack + '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif',
+            "font_stack": font_stack
+            + '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif',
             **payload,
         }
 
-    async def _render(self, data: dict[str, Any], *, persona_id: str, view: str, cache: bool) -> str:
+    async def _render(
+        self, data: dict[str, Any], *, persona_id: str, view: str, cache: bool
+    ) -> str:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(
             (
                 self.template
                 + "\n"
-                + json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                + json.dumps(
+                    data, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                )
             ).encode("utf-8")
         ).hexdigest()[:20]
         prefix = self._persona_key(persona_id)
-        filename = f"{prefix}-{view}-{digest}.png" if cache else f"{prefix}-{view}-{uuid.uuid4().hex}.png"
+        filename = (
+            f"{prefix}-{view}-{digest}.png"
+            if cache
+            else f"{prefix}-{view}-{uuid.uuid4().hex}.png"
+        )
         target = self.cache_dir / filename
         if cache and target.exists():
             return str(target)

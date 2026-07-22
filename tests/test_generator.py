@@ -97,12 +97,17 @@ def existing_plan():
 def generator_config(*, retries=0, outfit_styles=None, extra_settings=None):
     settings = {
         "generation_retries": retries,
+        "generation_retry_prompt_template": (
+            "RETRY {mode} attempt={attempt} error={error} "
+            "previous=<previous>{previous_output}</previous>"
+        ),
         "schedule_generation_system_prompt": "SCHEDULE_SYSTEM",
         "schedule_prompt_template": (
             "SCHEDULE {mode} {date} {persona} {theme} {mood} {history} "
             "{long_term_context} {outfit_context} {timeline} {requirements}"
         ),
         "outfit_generation_system_prompt": "OUTFIT_SYSTEM",
+        "outfit_generation_additional_system_prompt": "UNDERPANTS_SYSTEM",
         "outfit_prompt_template": (
             "OUTFIT {mode} {date} {persona} {theme} {mood} {outfit_style} "
             "{timeline} {current_outfit} {requirements}"
@@ -184,8 +189,94 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rewritten.proactive_windows, original.proactive_windows)
         self.assertEqual(rewritten.private_bonus, original.private_bonus)
         self.assertIn("旧日程", provider.prompts[0])
-        self.assertEqual(provider.system_prompts[0], "OUTFIT_SYSTEM")
+        self.assertEqual(
+            provider.system_prompts[0], "OUTFIT_SYSTEM\n\nUNDERPANTS_SYSTEM"
+        )
         self.assertNotIn("SCHEDULE_SYSTEM", provider.system_prompts[0])
+
+    async def test_rewrite_outfit_accepts_direct_outfit_object(self):
+        provider = Provider(
+            [json.dumps(outfit_payload("直接返回的穿搭"), ensure_ascii=False)]
+        )
+        generator = DailyPlanGenerator(
+            Context(provider),
+            generator_config(outfit_styles=["复古文艺风", "可爱甜美风"]),
+        )
+
+        rewritten = await generator.rewrite_outfit(
+            existing_plan(), PersonaContext("alice", "persona")
+        )
+
+        self.assertEqual(rewritten.outfit.summary, "直接返回的穿搭")
+        self.assertEqual(rewritten.outfit.style, "可爱甜美风")
+        self.assertEqual(provider.calls, 1)
+
+    async def test_complete_generation_rejects_direct_outfit_fields(self):
+        payload = json.loads(valid_json())
+        payload.update(payload.pop("outfit"))
+        provider = Provider([json.dumps(payload, ensure_ascii=False), valid_json()])
+        generator = DailyPlanGenerator(Context(provider), generator_config(retries=1))
+
+        plan = await generator.generate(
+            date(2026, 7, 14), PersonaContext("alice", "persona")
+        )
+
+        self.assertEqual(plan.status, "ok")
+        self.assertEqual(provider.calls, 2)
+        self.assertIn("missing structured outfit", provider.prompts[1])
+
+    async def test_rewrite_outfit_retry_includes_structural_failure(self):
+        valid_outfit = json.dumps(
+            {"outfit": outfit_payload("修正后的穿搭")}, ensure_ascii=False
+        )
+        provider = Provider(['{"result": "missing wrapper"}', valid_outfit])
+        generator = DailyPlanGenerator(
+            Context(provider),
+            generator_config(
+                retries=1,
+                outfit_styles=["复古文艺风", "可爱甜美风"],
+            ),
+        )
+
+        rewritten = await generator.rewrite_outfit(
+            existing_plan(), PersonaContext("alice", "persona")
+        )
+
+        self.assertEqual(rewritten.outfit.summary, "修正后的穿搭")
+        self.assertEqual(provider.calls, 2)
+        self.assertIn('"result": "missing wrapper"', provider.prompts[1])
+        self.assertIn("missing structured outfit", provider.prompts[1])
+
+    async def test_rewrite_outfit_retries_when_underpants_are_missing(self):
+        missing_underpants = outfit_payload("缺少内裤的穿搭")
+        missing_underpants["items"] = [
+            item
+            for item in missing_underpants["items"]
+            if item["category"] != "underpants"
+        ]
+        provider = Provider(
+            [
+                json.dumps({"outfit": missing_underpants}, ensure_ascii=False),
+                json.dumps(
+                    {"outfit": outfit_payload("包含内裤的穿搭")},
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        generator = DailyPlanGenerator(
+            Context(provider),
+            generator_config(
+                retries=1,
+                outfit_styles=["复古文艺风", "可爱甜美风"],
+            ),
+        )
+
+        rewritten = await generator.rewrite_outfit(
+            existing_plan(), PersonaContext("alice", "persona")
+        )
+
+        self.assertEqual(rewritten.outfit.summary, "包含内裤的穿搭")
+        self.assertIn("outfit must contain category: underpants", provider.prompts[1])
 
     async def test_rewrite_outfit_honors_explicit_configured_style(self):
         response = json.dumps(
@@ -231,9 +322,31 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan.persona_id, "alice")
         self.assertEqual(plan.outfit.style, "日常休闲风")
         self.assertEqual(provider.calls, 2)
-        self.assertEqual(provider.system_prompts[0], "SCHEDULE_SYSTEM\n\nOUTFIT_SYSTEM")
+        self.assertEqual(
+            provider.system_prompts[0],
+            "SCHEDULE_SYSTEM\n\nOUTFIT_SYSTEM\n\nUNDERPANTS_SYSTEM",
+        )
         self.assertIn("SCHEDULE 完整生成", provider.prompts[0])
         self.assertIn("OUTFIT 完整生成", provider.prompts[0])
+        self.assertIn("not json", provider.prompts[1])
+        self.assertIn(
+            "LLM response does not contain a JSON object", provider.prompts[1]
+        )
+        self.assertIn("attempt=2", provider.prompts[1])
+
+    async def test_retry_prompt_only_contains_latest_invalid_output(self):
+        provider = Provider(["first invalid", "second invalid", valid_json()])
+        generator = DailyPlanGenerator(Context(provider), generator_config(retries=2))
+
+        plan = await generator.generate(
+            date(2026, 7, 14), PersonaContext("alice", "persona")
+        )
+
+        self.assertEqual(plan.status, "ok")
+        self.assertIn("first invalid", provider.prompts[1])
+        self.assertNotIn("first invalid", provider.prompts[2])
+        self.assertIn("second invalid", provider.prompts[2])
+        self.assertIn("attempt=3", provider.prompts[2])
 
     async def test_invalid_outputs_create_failed_plan(self):
         provider = Provider(["bad", "still bad"])

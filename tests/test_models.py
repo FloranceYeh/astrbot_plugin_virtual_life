@@ -13,12 +13,39 @@ def valid_payload():
         "mood": "轻快",
         "outfit": outfit_payload("清爽的夏日学院风"),
         "timeline": [
-            {"id": "sleep", "start": "00:00", "end": "07:00", "activity": "睡觉", "state": "sleep", "availability": "blocked"},
-            {"id": "day", "start": "07:00", "end": "23:00", "activity": "生活与工作", "state": "available", "availability": "normal"},
-            {"id": "night", "start": "23:00", "end": "24:00", "activity": "睡觉", "state": "sleep", "availability": "blocked"},
+            {
+                "id": "sleep",
+                "start": "00:00",
+                "end": "07:00",
+                "activity": "睡觉",
+                "state": "sleep",
+                "availability": "blocked",
+            },
+            {
+                "id": "day",
+                "start": "07:00",
+                "end": "23:00",
+                "activity": "生活与工作",
+                "state": "available",
+                "availability": "normal",
+            },
+            {
+                "id": "night",
+                "start": "23:00",
+                "end": "24:00",
+                "activity": "睡觉",
+                "state": "sleep",
+                "availability": "blocked",
+            },
         ],
         "proactive_windows": [
-            {"id": "hello", "at": "12:00", "intent": "分享午饭", "audience": "both", "source_item_id": "day"}
+            {
+                "id": "hello",
+                "at": "12:00",
+                "intent": "分享午饭",
+                "audience": "both",
+                "source_item_id": "day",
+            }
         ],
         "budget_bonus": {"private": 2, "group": 1},
     }
@@ -44,6 +71,18 @@ class ModelTests(unittest.TestCase):
         plan = DailyPlan.from_dict(payload)
         self.assertEqual(plan.outfit.style, "未记录")
 
+    def test_legacy_outfit_without_underpants_is_supported(self):
+        payload = valid_payload()
+        payload["outfit"]["items"] = [
+            item
+            for item in payload["outfit"]["items"]
+            if item["category"] != "underpants"
+        ]
+
+        plan = DailyPlan.from_dict(payload)
+
+        self.assertNotIn("underpants", {item.category for item in plan.outfit.items})
+
     def test_string_outfit_is_rejected(self):
         payload = valid_payload()
         payload["outfit"] = "白衬衫和长裙"
@@ -52,7 +91,11 @@ class ModelTests(unittest.TestCase):
 
     def test_incomplete_outfit_is_rejected(self):
         payload = valid_payload()
-        payload["outfit"]["items"] = [item for item in payload["outfit"]["items"] if item["category"] != "underwear"]
+        payload["outfit"]["items"] = [
+            item
+            for item in payload["outfit"]["items"]
+            if item["category"] != "underwear"
+        ]
         with self.assertRaisesRegex(ValueError, "underwear"):
             DailyPlan.from_dict(payload)
 

@@ -30,8 +30,23 @@ def daily_plan():
             "mood": "专注",
             "outfit": outfit_payload("夏季学院风"),
             "timeline": [
-                {"id": "sleep", "start": "00:00", "end": "08:00", "activity": "睡觉", "state": "sleep", "availability": "blocked"},
-                {"id": "study", "start": "08:00", "end": "24:00", "activity": "学习", "location": "图书馆", "state": "focus", "availability": "low"},
+                {
+                    "id": "sleep",
+                    "start": "00:00",
+                    "end": "08:00",
+                    "activity": "睡觉",
+                    "state": "sleep",
+                    "availability": "blocked",
+                },
+                {
+                    "id": "study",
+                    "start": "08:00",
+                    "end": "24:00",
+                    "activity": "学习",
+                    "location": "图书馆",
+                    "state": "focus",
+                    "availability": "low",
+                },
             ],
             "proactive_windows": [],
             "budget_bonus": {},
@@ -48,7 +63,17 @@ def stage():
         "end_date": "2027-01-20",
         "priority": 50,
         "summary": "正常上课",
-        "weekly_rules": [{"weekdays": [2], "start": "18:00", "end": "20:00", "title": "社团例会", "location": "活动室", "participants": ["社员"], "required": True}],
+        "weekly_rules": [
+            {
+                "weekdays": [2],
+                "start": "18:00",
+                "end": "20:00",
+                "title": "社团例会",
+                "location": "活动室",
+                "participants": ["社员"],
+                "required": True,
+            }
+        ],
         "special_dates": [],
         "holidays": [{"date": "2026-09-25", "name": "中秋节", "kind": "traditional"}],
         "special_periods": [],
@@ -79,9 +104,13 @@ class ImageRendererTests(unittest.IsolatedAsyncioTestCase):
                         "constraints": ["减少娱乐", "保证睡眠"],
                     }
                 ],
-                "holidays": [{"date": "2026-07-14", "name": "纪念日", "kind": "public"}],
+                "holidays": [
+                    {"date": "2026-07-14", "name": "纪念日", "kind": "public"}
+                ],
             }
-            output = await renderer.render_timeline(daily_plan(), datetime(2026, 7, 14, 9, 30), long_term_day)
+            output = await renderer.render_timeline(
+                daily_plan(), datetime(2026, 7, 14, 9, 30), long_term_day
+            )
             self.assertTrue(Path(output).exists())
             data = backend.calls[0][1]
             items = data["items"]
@@ -91,7 +120,9 @@ class ImageRendererTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(data["theme_text"], "学习日")
             self.assertEqual(data["mood"], "专注")
             self.assertEqual(data["current_stage"]["name"], "暑期学习阶段")
-            self.assertEqual(data["active_periods"][0]["constraints_text"], "减少娱乐；保证睡眠")
+            self.assertEqual(
+                data["active_periods"][0]["constraints_text"], "减少娱乐；保证睡眠"
+            )
             self.assertEqual(data["today_holidays"][0]["name"], "纪念日")
             self.assertEqual(backend.calls[0][3]["type"], "png")
 
@@ -121,6 +152,7 @@ class ImageRendererTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(data["theme_text"], "学习日")
             self.assertEqual(data["mood"], "专注")
             self.assertEqual(data["outfit_items"][1]["label"], "内衣与打底")
+            self.assertEqual(data["outfit_items"][2]["label"], "内裤")
 
     async def test_stage_render_is_cached_by_content(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -131,14 +163,20 @@ class ImageRendererTests(unittest.IsolatedAsyncioTestCase):
             second = await renderer.render_stage(stage(), "Caranlaf")
             self.assertEqual(first, second)
             self.assertEqual(len(backend.calls), 1)
-            self.assertEqual(backend.calls[0][1]["stage"]["weekly_rules"][0]["weekday_text"], "周二")
-            self.assertEqual(backend.calls[0][1]["stage"]["holidays"][0]["name"], "中秋节")
+            self.assertEqual(
+                backend.calls[0][1]["stage"]["weekly_rules"][0]["weekday_text"], "周二"
+            )
+            self.assertEqual(
+                backend.calls[0][1]["stage"]["holidays"][0]["name"], "中秋节"
+            )
 
     async def test_stage_list_builds_relative_timeline(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             backend = FakeHtmlRenderer(root)
-            renderer = ScheduleImageRenderer(root, backend, {"image_theme": "light", "image_width": 900})
+            renderer = ScheduleImageRenderer(
+                root, backend, {"image_theme": "light", "image_width": 900}
+            )
             await renderer.render_stage_list([stage()], "Caranlaf")
             data = backend.calls[0][1]
             self.assertEqual(data["theme"], "light")

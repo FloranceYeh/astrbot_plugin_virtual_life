@@ -148,9 +148,9 @@ class SmartContextInjector:
     def _outfit_section(self, plan: DailyPlan, *, include_underwear: bool, underwear_only: bool = False) -> str:
         items = []
         for item in plan.outfit.items:
-            if underwear_only and item.category != "underwear":
+            if underwear_only and item.category not in {"underwear", "underpants"}:
                 continue
-            if not include_underwear and item.category == "underwear":
+            if not include_underwear and item.category in {"underwear", "underpants"}:
                 continue
             detail = f"（{item.details}）" if item.details else ""
             items.append(f"{OUTFIT_CATEGORY_LABELS[item.category]}：{item.name}{detail}")

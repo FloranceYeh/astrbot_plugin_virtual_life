@@ -254,6 +254,12 @@ class DailyPlanGenerator:
                 ).strip()
                 for component in components
             ]
+            if include_outfit:
+                additional_outfit_prompt = str(
+                    settings.get("outfit_generation_additional_system_prompt", "") or ""
+                ).strip()
+                if additional_outfit_prompt:
+                    system_prompts.append(additional_outfit_prompt)
             prompt_templates = [
                 str(settings.get(f"{component}_prompt_template", "") or "").strip()
                 for component in components
@@ -261,13 +267,21 @@ class DailyPlanGenerator:
             if any(not value for value in system_prompts + prompt_templates):
                 raise RuntimeError("schedule or outfit generation prompt is empty")
             system_prompt = "\n\n".join(system_prompts)
-            prompt = "\n\n".join(
+            base_prompt = "\n\n".join(
                 template.format(**variables) for template in prompt_templates
             )
 
-            attempts = max(1, int(settings.get("generation_retries", 1)) + 1)
+            attempts = max(1, int(settings.get("generation_retries", 2)) + 1)
+            retry_template = str(
+                settings.get("generation_retry_prompt_template", "") or ""
+            ).strip()
+            if attempts > 1 and not retry_template:
+                raise RuntimeError("generation retry prompt template is empty")
             last_error = ""
+            retry_feedback = ""
             for attempt in range(attempts):
+                prompt = base_prompt + retry_feedback
+                raw = ""
                 try:
                     raw = await self._call_llm_with_system(
                         prompt,
@@ -302,11 +316,25 @@ class DailyPlanGenerator:
                         if not isinstance(bonus, dict):
                             raise ValueError("budget_bonus must be an object")
                     outfit: dict | None = None
+                    parsed_outfit: Outfit | None = None
                     if include_outfit:
                         outfit = payload.get("outfit")
+                        if (
+                            not include_schedule
+                            and not isinstance(outfit, dict)
+                            and isinstance(payload.get("items"), list)
+                        ):
+                            outfit = payload
                         if not isinstance(outfit, dict):
                             raise ValueError("missing structured outfit")
                         outfit["style"] = outfit_style
+                        parsed_outfit = Outfit.from_dict(outfit)
+                        parsed_outfit.validate_complete()
+                        if not any(
+                            item.category == "underpants"
+                            for item in parsed_outfit.items
+                        ):
+                            raise ValueError("outfit must contain category: underpants")
                     revision = hashlib.sha1(
                         f"{base_plan.revision if base_plan else ''}\n{mode}\n{raw}".encode()
                     ).hexdigest()[:12]
@@ -332,7 +360,7 @@ class DailyPlanGenerator:
                             group_bonus=int(bonus.get("group", 0)),
                         )
                     if include_outfit:
-                        rewritten = replace(rewritten, outfit=Outfit.from_dict(outfit))
+                        rewritten = replace(rewritten, outfit=parsed_outfit)
                     return replace(rewritten, revision=revision)
                 except Exception as exc:
                     last_error = str(exc)
@@ -343,7 +371,25 @@ class DailyPlanGenerator:
                         attempt + 1,
                         exc,
                     )
-                    prompt += f"\n\n上一次输出无效：{last_error}。请修正错误并重新输出完整 JSON 对象。"
+                    if attempt + 1 < attempts:
+                        previous_output = raw or "（模型未返回可用文本）"
+                        if len(previous_output) > 12000:
+                            previous_output = (
+                                previous_output[:6000]
+                                + "\n...（中间内容已截断）...\n"
+                                + previous_output[-6000:]
+                            )
+                        try:
+                            retry_feedback = "\n\n" + retry_template.format(
+                                mode=mode,
+                                attempt=attempt + 2,
+                                error=last_error,
+                                previous_output=previous_output,
+                            )
+                        except (KeyError, IndexError, ValueError) as template_error:
+                            raise RuntimeError(
+                                f"invalid generation retry prompt variable: {template_error}"
+                            ) from template_error
             raise RuntimeError(last_error or "plan generation failed")
         finally:
             self.generating.discard(key)

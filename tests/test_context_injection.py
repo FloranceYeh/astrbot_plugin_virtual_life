@@ -88,10 +88,12 @@ class SmartContextInjectionTests(unittest.TestCase):
         self.assertIn("今日穿搭", content)
         self.assertIn("白色短袖衬衫", content)
         self.assertNotIn("浅色无痕内衣", content)
+        self.assertNotIn("浅色无痕内裤", content)
 
     def test_underwear_keyword_includes_underwear(self):
         content = SmartContextInjector(injection_settings()).build(self.plan, self.now, self.long_term, "内衣怎么搭？")
         self.assertIn("浅色无痕内衣", content)
+        self.assertIn("浅色无痕内裤", content)
 
     def test_schedule_and_long_term_modules_are_combined(self):
         content = SmartContextInjector(injection_settings()).build(self.plan, self.now, self.long_term, "考试前我几点有空？")

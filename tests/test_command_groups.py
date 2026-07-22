@@ -71,14 +71,36 @@ class CommandGroupContractTests(unittest.TestCase):
         schedule_system = settings["schedule_generation_system_prompt"]["default"]
         schedule_template = settings["schedule_prompt_template"]["default"]
         outfit_system = settings["outfit_generation_system_prompt"]["default"]
+        outfit_additional_system = settings[
+            "outfit_generation_additional_system_prompt"
+        ]["default"]
         outfit_template = settings["outfit_prompt_template"]["default"]
+        retry_template = settings["generation_retry_prompt_template"]["default"]
+        self.assertEqual(settings["generation_retries"]["default"], 2)
         self.assertIn("timeline 第一项", schedule_system)
+        self.assertIn('"timeline"', schedule_system)
         self.assertIn("{outfit_context}", schedule_template)
         self.assertIn(
             "outfit 必须是包含非空 style、summary 和 items 数组", outfit_system
         )
+        self.assertIn('"outfit"', outfit_system)
         self.assertIn("underwear", outfit_system)
+        self.assertIn("underpants", outfit_system)
+        self.assertIn("category 必须严格等于 underpants", outfit_additional_system)
         self.assertIn("{outfit_style}", outfit_template)
+        self.assertIn("{previous_output}", retry_template)
+        self.assertIn("{error}", retry_template)
+        self.assertIn("重写穿搭时", retry_template)
+        formatted_retry = retry_template.format(
+            mode="重写穿搭",
+            attempt=2,
+            error="missing structured outfit",
+            previous_output='{"result": "invalid"}',
+        )
+        self.assertIn(
+            '{"outfit": {"style": "指定风格", "summary": "非空概述", "items": []}}',
+            formatted_retry,
+        )
         self.assertNotIn("generation_system_prompt", settings)
         self.assertNotIn("prompt_template", settings)
 

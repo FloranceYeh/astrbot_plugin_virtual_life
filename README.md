@@ -17,7 +17,7 @@
 - 首次时间表必须经过管理员草稿批准；当前最后阶段结束时自动生成连续后续阶段并通知批准会话。
 - 私聊、群聊分别使用 UMO 白名单，不会自动向未知会话发送消息。
 - 日程包含穿搭、活动时间线、可打扰程度和主动分享窗口。
-- 穿搭使用结构化分类，覆盖发型、内衣、上下装、裙装、腿部穿搭、外套、鞋履、配饰、包具、妆容、香氛和其他造型细节。
+- 穿搭使用结构化分类，覆盖发型、内衣、内裤、上下装、裙装、腿部穿搭、外套、鞋履、配饰、包具、妆容、香氛和其他造型细节。
 - 忙碌、专注与睡眠状态会动态抑制或延后主动消息，不使用固定免打扰时段。
 - 每个会话每天随机生成主动消息预算，LLM 只能在管理员硬上限内建议增加预算。
 - 连续三次主动消息无人回应后暂停，收到新消息后恢复。
@@ -82,6 +82,8 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 - 每日生成时间：`07:00`
 - `schedule_llm_provider`：通过 AstrBot 内置 Provider 选择器指定日程生成模型，留空使用当前供应商
 - `proactive_llm_provider`：通过 AstrBot 内置 Provider 选择器单独指定主动消息模型，留空使用当前供应商
+- `generation_retries`：生成结果校验失败后的额外重试次数，默认 `2`；每次重试只参考最近一次失败输出
+- `generation_retry_prompt_template`：生成纠错提示模板，可使用 `{mode}`、`{attempt}`、`{error}`、`{previous_output}`；上次输出最多注入 `12000` 个字符
 - 历史日程参考天数：`3`，设置为 `0` 可关闭
 - `smart_context_injection.enable`：普通聊天智能状态注入总开关，默认启用；不额外调用 LLM
 - `smart_context_injection.base_module_enable`：是否始终注入当前基础状态，默认关闭；关闭后仅在关键词命中时注入对应模块
@@ -148,7 +150,7 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 
 启用 `smart_context_injection` 后，插件根据本地关键词注入需要的摘要，不额外请求 LLM。默认不会始终注入基础状态；开启 `base_module_enable` 后才会在每次普通聊天中加入当前时间、活动、地点、状态、可打扰程度以及回访工具约束：
 
-- 穿搭词追加外显穿搭；只有明确内衣、打底、贴身等词才追加内衣与打底信息。
+- 穿搭词追加外显穿搭；只有明确内衣、内裤、打底、贴身等词才追加内衣、内裤与打底信息。
 - 日程词追加当前时间、活动、地点、状态、可打扰程度、主题、心情、当前时段和下一项活动。
 - 上课、考试、项目、工期等词追加当前阶段、固定事件、特殊时期、约束和近期里程碑。
 - 完整日程、校历、工期表等请求会提示模型优先调用 `get_virtual_daily_schedule` 或 `get_long_term_timeline`，而不是根据摘要虚构完整内容。
