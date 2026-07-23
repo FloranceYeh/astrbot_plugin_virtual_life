@@ -1,7 +1,7 @@
 name: astrbot_plugin_virtual_life
 display_name: 虚拟人生
 desc: Virtual Life：按人格管理长期阶段、虚拟日程与主动消息
-version: v1.10.1
+version: v1.10.2
 author: Florance
 repo: https://github.com/FloranceYeh/astrbot_plugin_virtual_life
 astrbot_version: ">=4.26.0"

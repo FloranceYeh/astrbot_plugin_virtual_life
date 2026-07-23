@@ -1,5 +1,6 @@
 import json
 import unittest
+from dataclasses import replace
 from datetime import date
 
 from core.generator import DailyPlanGenerator
@@ -97,25 +98,36 @@ def existing_plan():
 def generator_config(*, retries=0, outfit_styles=None, extra_settings=None):
     settings = {
         "generation_retries": retries,
+    }
+    prompt_settings = {
         "generation_retry_prompt_template": (
             "RETRY {mode} attempt={attempt} error={error} "
             "previous=<previous>{previous_output}</previous>"
         ),
         "schedule_generation_system_prompt": "SCHEDULE_SYSTEM",
+        "complete_generation_prompt_template": (
+            "COMPLETE {mode} {date} {persona} {theme} {mood} {outfit_style} "
+            "{history} {long_term_context} {requirements}"
+        ),
         "schedule_prompt_template": (
             "SCHEDULE {mode} {date} {persona} {theme} {mood} {history} "
             "{long_term_context} {outfit_context} {timeline} {requirements}"
         ),
         "outfit_generation_system_prompt": "OUTFIT_SYSTEM",
-        "outfit_generation_additional_system_prompt": "UNDERPANTS_SYSTEM",
         "outfit_prompt_template": (
             "OUTFIT {mode} {date} {persona} {theme} {mood} {outfit_style} "
             "{timeline} {current_outfit} {requirements}"
         ),
     }
-    settings.update(extra_settings or {})
+    for key, value in (extra_settings or {}).items():
+        target = prompt_settings if key in prompt_settings else settings
+        target[key] = value
     pool = {} if outfit_styles is None else {"outfit_styles": outfit_styles}
-    return {"schedule_settings": settings, "creative_pool": pool}
+    return {
+        "schedule_settings": settings,
+        "prompt_settings": prompt_settings,
+        "creative_pool": pool,
+    }
 
 
 class GeneratorTests(unittest.IsolatedAsyncioTestCase):
@@ -189,9 +201,7 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rewritten.proactive_windows, original.proactive_windows)
         self.assertEqual(rewritten.private_bonus, original.private_bonus)
         self.assertIn("旧日程", provider.prompts[0])
-        self.assertEqual(
-            provider.system_prompts[0], "OUTFIT_SYSTEM\n\nUNDERPANTS_SYSTEM"
-        )
+        self.assertEqual(provider.system_prompts[0], "OUTFIT_SYSTEM")
         self.assertNotIn("SCHEDULE_SYSTEM", provider.system_prompts[0])
 
     async def test_rewrite_outfit_accepts_direct_outfit_object(self):
@@ -324,10 +334,12 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provider.calls, 2)
         self.assertEqual(
             provider.system_prompts[0],
-            "SCHEDULE_SYSTEM\n\nOUTFIT_SYSTEM\n\nUNDERPANTS_SYSTEM",
+            "SCHEDULE_SYSTEM\n\nOUTFIT_SYSTEM",
         )
-        self.assertIn("SCHEDULE 完整生成", provider.prompts[0])
-        self.assertIn("OUTFIT 完整生成", provider.prompts[0])
+        self.assertIn("COMPLETE 完整生成", provider.prompts[0])
+        self.assertNotIn("SCHEDULE 完整生成", provider.prompts[0])
+        self.assertNotIn("OUTFIT 完整生成", provider.prompts[0])
+        self.assertEqual(provider.prompts[0].count("persona"), 1)
         self.assertIn("not json", provider.prompts[1])
         self.assertIn(
             "LLM response does not contain a JSON object", provider.prompts[1]
@@ -391,6 +403,32 @@ class GeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2026-07-13", provider.prompts[0])
         self.assertIn("在家看书", provider.prompts[0])
         self.assertIn("不要照抄", provider.prompts[0])
+
+    def test_history_only_keeps_latest_plan_detailed(self):
+        base = existing_plan()
+        older = replace(
+            base,
+            date="2026-07-12",
+            theme="旧主题",
+            timeline=(replace(base.timeline[0], activity="旧活动", location="旧地点"),),
+        )
+        latest = replace(
+            base,
+            date="2026-07-13",
+            theme="最近主题",
+            timeline=(
+                replace(base.timeline[0], activity="最近活动", location="最近地点"),
+            ),
+        )
+
+        history = DailyPlanGenerator._format_history([older, latest])
+
+        self.assertIn("较早日程摘要", history)
+        self.assertIn("主要活动：旧活动", history)
+        self.assertNotIn("00:00-24:00 旧活动", history)
+        self.assertNotIn("旧地点", history)
+        self.assertIn("最近一天详情", history)
+        self.assertIn("00:00-24:00 最近活动 @ 最近地点", history)
 
     async def test_generation_prompts_are_combined(self):
         provider = Provider([valid_json()])

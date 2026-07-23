@@ -24,6 +24,9 @@ class DailyPlanGenerator:
     def _settings(self) -> dict:
         return self.config.get("schedule_settings", {}) or {}
 
+    def _prompt_settings(self) -> dict:
+        return self.config.get("prompt_settings", {}) or {}
+
     def _pool(self) -> dict:
         return self.config.get("creative_pool", {}) or {}
 
@@ -123,7 +126,6 @@ class DailyPlanGenerator:
             mood=plan.mood,
             outfit_style=plan.outfit.style,
             base_plan=plan,
-            history=self._format_history([plan]),
             long_term_context=long_term_context,
             outfit_context=outfit_context,
             timeline=timeline,
@@ -227,6 +229,7 @@ class DailyPlanGenerator:
         self.generating.add(key)
         try:
             settings = self._settings()
+            prompt_settings = self._prompt_settings()
             variables = {
                 "mode": mode,
                 "date": target.isoformat(),
@@ -250,19 +253,19 @@ class DailyPlanGenerator:
                 components.append("outfit")
             system_prompts = [
                 str(
-                    settings.get(f"{component}_generation_system_prompt", "") or ""
+                    prompt_settings.get(f"{component}_generation_system_prompt", "")
+                    or ""
                 ).strip()
                 for component in components
             ]
-            if include_outfit:
-                additional_outfit_prompt = str(
-                    settings.get("outfit_generation_additional_system_prompt", "") or ""
-                ).strip()
-                if additional_outfit_prompt:
-                    system_prompts.append(additional_outfit_prompt)
+            prompt_template_keys = (
+                ["complete_generation_prompt_template"]
+                if include_schedule and include_outfit
+                else [f"{components[0]}_prompt_template"]
+            )
             prompt_templates = [
-                str(settings.get(f"{component}_prompt_template", "") or "").strip()
-                for component in components
+                str(prompt_settings.get(key, "") or "").strip()
+                for key in prompt_template_keys
             ]
             if any(not value for value in system_prompts + prompt_templates):
                 raise RuntimeError("schedule or outfit generation prompt is empty")
@@ -273,7 +276,7 @@ class DailyPlanGenerator:
 
             attempts = max(1, int(settings.get("generation_retries", 2)) + 1)
             retry_template = str(
-                settings.get("generation_retry_prompt_template", "") or ""
+                prompt_settings.get("generation_retry_prompt_template", "") or ""
             ).strip()
             if attempts > 1 and not retry_template:
                 raise RuntimeError("generation retry prompt template is empty")
@@ -330,11 +333,6 @@ class DailyPlanGenerator:
                         outfit["style"] = outfit_style
                         parsed_outfit = Outfit.from_dict(outfit)
                         parsed_outfit.validate_complete()
-                        if not any(
-                            item.category == "underpants"
-                            for item in parsed_outfit.items
-                        ):
-                            raise ValueError("outfit must contain category: underpants")
                     revision = hashlib.sha1(
                         f"{base_plan.revision if base_plan else ''}\n{mode}\n{raw}".encode()
                     ).hexdigest()[:12]
@@ -420,19 +418,31 @@ class DailyPlanGenerator:
     @staticmethod
     def _format_history(plans: list[DailyPlan]) -> str:
         if not plans:
-            return "\n\n近期同人格日程：无。"
-        blocks = []
-        for plan in plans:
-            _, activities = DailyPlanGenerator._format_plan_context(plan)
+            return "无"
+        blocks: list[str] = []
+        older_plans = plans[:-1]
+        if older_plans:
+            blocks.append("较早日程摘要：")
+        for plan in older_plans:
+            activities = "、".join(
+                dict.fromkeys(item.activity for item in plan.timeline)
+            )
             blocks.append(
                 f"- {plan.date}｜主题：{plan.theme}｜心情：{plan.mood}｜"
-                f"穿搭风格：{plan.outfit.style}｜穿搭：{plan.outfit.summary}｜活动：{activities}"
+                f"穿搭风格：{plan.outfit.style}｜主要活动：{activities or '无'}"
             )
-        return (
-            "\n\n近期同人格日程（仅用于保持生活连续性并避免重复）：\n"
-            + "\n".join(blocks)
-            + "\n新日程可以延续尚未完成的兴趣或状态，但不要照抄相同主题、穿搭和活动组合。"
+        latest = plans[-1]
+        _, latest_activities = DailyPlanGenerator._format_plan_context(latest)
+        blocks.extend(
+            [
+                "最近一天详情：",
+                f"- {latest.date}｜主题：{latest.theme}｜心情：{latest.mood}｜"
+                f"穿搭风格：{latest.outfit.style}｜穿搭：{latest.outfit.summary}｜"
+                f"活动：{latest_activities}",
+                "新日程可以延续尚未完成的兴趣或状态，但不要照抄相同主题、穿搭和活动组合。",
+            ]
         )
+        return "\n".join(blocks)
 
     async def generate_long_term_timeline(
         self,

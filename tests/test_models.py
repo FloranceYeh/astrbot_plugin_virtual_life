@@ -71,17 +71,15 @@ class ModelTests(unittest.TestCase):
         plan = DailyPlan.from_dict(payload)
         self.assertEqual(plan.outfit.style, "未记录")
 
-    def test_legacy_outfit_without_underpants_is_supported(self):
+    def test_outfit_without_underpants_is_rejected(self):
         payload = valid_payload()
         payload["outfit"]["items"] = [
             item
             for item in payload["outfit"]["items"]
             if item["category"] != "underpants"
         ]
-
-        plan = DailyPlan.from_dict(payload)
-
-        self.assertNotIn("underpants", {item.category for item in plan.outfit.items})
+        with self.assertRaisesRegex(ValueError, "underpants"):
+            DailyPlan.from_dict(payload)
 
     def test_string_outfit_is_rejected(self):
         payload = valid_payload()

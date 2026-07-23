@@ -162,7 +162,7 @@ class Outfit:
 
     def validate_complete(self) -> None:
         categories = {item.category for item in self.items}
-        for required in ("hairstyle", "underwear", "shoes"):
+        for required in ("hairstyle", "underwear", "underpants", "shoes"):
             if required not in categories:
                 raise ValueError(f"outfit must contain category: {required}")
         if not categories.intersection({"top", "dress", "other"}):

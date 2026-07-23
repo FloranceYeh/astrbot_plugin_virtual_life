@@ -68,25 +68,33 @@ class CommandGroupContractTests(unittest.TestCase):
     def test_default_prompt_requires_structured_outfit(self):
         schema = json.loads(Path("_conf_schema.json").read_text(encoding="utf-8"))
         settings = schema["schedule_settings"]["items"]
-        schedule_system = settings["schedule_generation_system_prompt"]["default"]
-        schedule_template = settings["schedule_prompt_template"]["default"]
-        outfit_system = settings["outfit_generation_system_prompt"]["default"]
-        outfit_additional_system = settings[
-            "outfit_generation_additional_system_prompt"
-        ]["default"]
-        outfit_template = settings["outfit_prompt_template"]["default"]
-        retry_template = settings["generation_retry_prompt_template"]["default"]
+        prompt_group = schema["prompt_settings"]
+        prompts = prompt_group["items"]
+        schedule_system = prompts["schedule_generation_system_prompt"]["default"]
+        complete_template = prompts["complete_generation_prompt_template"]["default"]
+        schedule_template = prompts["schedule_prompt_template"]["default"]
+        outfit_system = prompts["outfit_generation_system_prompt"]["default"]
+        outfit_template = prompts["outfit_prompt_template"]["default"]
+        retry_template = prompts["generation_retry_prompt_template"]["default"]
         self.assertEqual(settings["generation_retries"]["default"], 2)
+        self.assertEqual(prompt_group["type"], "object")
+        self.assertTrue(all(item["collapsed"] for item in prompts.values()))
         self.assertIn("timeline 第一项", schedule_system)
         self.assertIn('"timeline"', schedule_system)
+        self.assertIn("{outfit_style}", complete_template)
+        self.assertIn("{history}", complete_template)
+        self.assertIn(
+            "timeline、proactive_windows、budget_bonus 和 outfit", complete_template
+        )
         self.assertIn("{outfit_context}", schedule_template)
+        self.assertNotIn("{history}", schedule_template)
         self.assertIn(
             "outfit 必须是包含非空 style、summary 和 items 数组", outfit_system
         )
         self.assertIn('"outfit"', outfit_system)
         self.assertIn("underwear", outfit_system)
         self.assertIn("underpants", outfit_system)
-        self.assertIn("category 必须严格等于 underpants", outfit_additional_system)
+        self.assertNotIn("outfit_generation_additional_system_prompt", prompts)
         self.assertIn("{outfit_style}", outfit_template)
         self.assertIn("{previous_output}", retry_template)
         self.assertIn("{error}", retry_template)
@@ -101,8 +109,8 @@ class CommandGroupContractTests(unittest.TestCase):
             '{"outfit": {"style": "指定风格", "summary": "非空概述", "items": []}}',
             formatted_retry,
         )
-        self.assertNotIn("generation_system_prompt", settings)
-        self.assertNotIn("prompt_template", settings)
+        self.assertNotIn("generation_system_prompt", prompts)
+        self.assertNotIn("prompt_template", prompts)
 
 
 if __name__ == "__main__":
