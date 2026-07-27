@@ -8,11 +8,6 @@ from typing import Any
 
 from astrbot.api import logger
 
-DEFAULT_REGEX = r".*?[。？！~…\n]+|.+$"
-DEFAULT_SPLIT_WORDS = ["。", "？", "！", "?", "!", "~", "…", r"\n"]
-DEFAULT_RANDOM_INTERVAL = (0.8, 2.0)
-DEFAULT_LOG_BASE = 2.6
-
 
 @dataclass(slots=True, frozen=True)
 class SegmentResult:
@@ -25,32 +20,40 @@ class SegmentResult:
 
 class ProactiveMessageSegmenter:
     def __init__(self, settings: dict[str, Any]):
-        self.enabled = bool(settings.get("enable", True))
-        self.threshold = self._nonnegative_int(settings.get("words_count_threshold"), 150)
-        mode = str(settings.get("split_mode", "words")).strip().lower()
-        self.mode = mode if mode in {"words", "regex"} else "words"
-        self.regex = self._compile_split_regex(str(settings.get("regex", DEFAULT_REGEX)))
-        self.split_words = self._split_words(settings.get("split_words", DEFAULT_SPLIT_WORDS))
+        self.enabled = bool(settings.get("enable"))
+        self.threshold = self._nonnegative_int(settings.get("words_count_threshold"))
+        self.mode = str(settings.get("split_mode") or "").strip().lower()
+        self.regex = self._compile_split_regex(settings.get("regex"))
+        self.split_words = self._split_words(settings.get("split_words"))
         self.words_pattern = self._compile_words_pattern(self.split_words)
-        cleanup_rule = str(settings.get("content_cleanup_rule", "")) if settings.get("enable_content_cleanup", False) else ""
+        cleanup_rule = (
+            str(settings.get("content_cleanup_rule") or "")
+            if settings.get("enable_content_cleanup")
+            else ""
+        )
         self.cleanup_pattern = self._compile_cleanup_regex(cleanup_rule)
-        interval_method = str(settings.get("interval_method", "log")).strip().lower()
-        self.interval_method = interval_method if interval_method in {"random", "log"} else "log"
-        self.random_interval = self._random_interval(settings.get("interval", "0.8,2.0"))
-        self.log_base = self._log_base(settings.get("log_base", DEFAULT_LOG_BASE))
+        self.interval_method = str(settings.get("interval_method") or "").strip().lower()
+        self.random_interval = self._random_interval(settings.get("interval"))
+        self.log_base = self._log_base(settings.get("log_base"))
 
     def split(self, text: str) -> SegmentResult:
         source_length = len(text)
         if not self.enabled:
             return self._unchanged(text, source_length, "disabled")
+        if self.threshold is None:
+            return self._unchanged(text, source_length, "invalid threshold")
         if source_length > self.threshold:
             return self._unchanged(text, source_length, "over threshold")
         if self.mode == "words":
             if self.words_pattern is None:
                 return self._unchanged(text, source_length, "empty split words")
             segments = [match.group(0) for match in self.words_pattern.finditer(text)]
-        else:
+        elif self.mode == "regex":
+            if self.regex is None:
+                return self._unchanged(text, source_length, "invalid regex")
             segments = [match.group(0) for match in self.regex.finditer(text)]
+        else:
+            return self._unchanged(text, source_length, "invalid split mode")
         cleaned = self._clean_segments(segments)
         if not cleaned:
             return self._unchanged(text, source_length, "no segments")
@@ -58,7 +61,11 @@ class ProactiveMessageSegmenter:
 
     def interval_for(self, segment: str) -> float:
         if self.interval_method == "random":
+            if self.random_interval is None:
+                return 0.0
             return random.uniform(*self.random_interval)
+        if self.interval_method != "log" or self.log_base is None:
+            return 0.0
         if all(ord(character) < 128 for character in segment):
             word_count = len(segment.split())
         else:
@@ -79,11 +86,11 @@ class ProactiveMessageSegmenter:
         return result
 
     @staticmethod
-    def _nonnegative_int(value: Any, default: int) -> int:
+    def _nonnegative_int(value: Any) -> int | None:
         try:
             return max(0, int(value))
         except (TypeError, ValueError):
-            return default
+            return None
 
     @staticmethod
     def _split_words(value: Any) -> list[str]:
@@ -111,12 +118,17 @@ class ProactiveMessageSegmenter:
         return re.compile(f".*?(?:{'|'.join(escaped)})|.+$", re.DOTALL)
 
     @staticmethod
-    def _compile_split_regex(value: str) -> re.Pattern[str]:
+    def _compile_split_regex(value: Any) -> re.Pattern[str] | None:
+        if not isinstance(value, str) or not value:
+            return None
         try:
-            return re.compile(value or DEFAULT_REGEX, re.DOTALL | re.MULTILINE)
+            return re.compile(value, re.DOTALL | re.MULTILINE)
         except re.error as exc:
-            logger.warning("[虚拟人生] 主动消息分段正则无效，使用默认规则: %s", exc)
-            return re.compile(DEFAULT_REGEX, re.DOTALL | re.MULTILINE)
+            logger.warning(
+                "[Virtual Life] Invalid proactive split regex; segmentation skipped: %s",
+                exc,
+            )
+            return None
 
     @staticmethod
     def _compile_cleanup_regex(value: str) -> re.Pattern[str] | None:
@@ -129,23 +141,21 @@ class ProactiveMessageSegmenter:
             return None
 
     @staticmethod
-    def _random_interval(value: Any) -> tuple[float, float]:
+    def _random_interval(value: Any) -> tuple[float, float] | None:
         try:
             parts = [float(item.strip()) for item in str(value).split(",")]
             if len(parts) != 2 or any(not math.isfinite(part) or part < 0 for part in parts):
                 raise ValueError
             return min(parts), max(parts)
         except (TypeError, ValueError):
-            logger.warning("[虚拟人生] 主动消息随机分段间隔无效，使用默认值 0.8,2.0")
-            return DEFAULT_RANDOM_INTERVAL
+            return None
 
     @staticmethod
-    def _log_base(value: Any) -> float:
+    def _log_base(value: Any) -> float | None:
         try:
             base = float(value)
             if not math.isfinite(base) or base <= 1:
                 raise ValueError
             return base
         except (TypeError, ValueError):
-            logger.warning("[虚拟人生] 主动消息对数分段基数无效，使用默认值 2.6")
-            return DEFAULT_LOG_BASE
+            return None

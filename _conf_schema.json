@@ -506,7 +506,7 @@
           "regex": {
             "description": "分段正则表达式",
             "type": "string",
-            "hint": "每次完整匹配作为一个消息段，无效时回退默认规则。",
+            "hint": "每次完整匹配作为一个消息段；为空或无效时不执行正则分段。",
             "condition": {
               "split_mode": "regex"
             },
