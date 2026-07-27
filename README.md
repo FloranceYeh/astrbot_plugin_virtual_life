@@ -114,6 +114,7 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 
 - `/虚拟日程 查看`：展示今日主题、心情、当前大时间段、今日特殊时间段与节日，并渲染高亮当前活动的 24 小时时间轴
 - `/虚拟日程 穿搭`：渲染今日穿搭风格、主题、心情、造型概述和单品明细
+- `/虚拟日程 要求 <日期或日期区间> <要求>`（管理员）：为当前人格未来日期的首次日程生成追加要求
 - `/虚拟日程 重写 [补充要求]`（管理员）：重新生成主题、心情、穿搭和时间日程
 - `/虚拟日程 重写日程 [补充要求]`（管理员）：保留主题、心情和穿搭，仅重写时间线、主动窗口与消息预算
 - `/虚拟日程 重写穿搭 [补充要求]`（管理员）：保留主题、心情和时间日程，仅重写穿搭；补充要求中可指定风格池里的风格
@@ -144,8 +145,13 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 - `schedule_proactive_followup`
 - `list_proactive_followups`
 - `cancel_proactive_followup`
+- `add_schedule_requirement`
 
 `schedule_proactive_followup` 只允许在用户明确提出稍后提醒、到点联系或询问结果时调用。工具参数 `scheduled_at` 必须是明确的 ISO 8601 时间；时间不明确时模型应先询问用户。
+
+日程要求按当前人格共享，只允许管理员通过命令或 LLM Tool 添加。命令日期支持 `YYYY-MM-DD`、`MM-DD` 和 `DD`，也可用 `..` 表示首尾均包含的区间，例如 `/虚拟日程 要求 7-29..8-2 减少远途活动`。省略年份时使用今年，省略月份时使用本月；右端省略部分且早于左端时自动推导到下一月或下一年，例如 `29..2` 表示本月 29 日至下月 2 日。只接受今天之后的日期，区间最长 366 天；每条最多 500 字，同一人格的任一日期最多叠加 10 条。
+
+区间内每个日期首次成功生成并保存日程后，只消费该日期对应的一次使用机会；生成失败时保留，成功后的当天重写不会再次应用。整个区间过期后，未消费的要求会自动清理。`add_schedule_requirement` 仅可在当前管理员明确提出要求时调用，参数为 `start_date`、`end_date` 和 `requirement`。
 
 ## 智能状态注入
 
@@ -216,7 +222,7 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 
 插件数据目录包含：
 
-- `plans.json`：人格日程
+- `plans.json`：人格日程及按人格保存的待消费日程要求
 - `sessions.json`：会话预算、未回复与睡眠抽签状态
 - `followups.json`：用户委托回访
 - `long_term_timelines.json`：按人格保存已批准阶段、待批准草稿和管理员通知会话

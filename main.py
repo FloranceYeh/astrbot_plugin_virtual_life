@@ -14,6 +14,7 @@ from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.agent.message import TextPart
 from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.provider.entities import ProviderRequest
+from astrbot.core.star.filter.command import GreedyStr
 
 from .core.context_injection import SmartContextInjector
 from .core.generator import DailyPlanGenerator
@@ -21,7 +22,12 @@ from .core.image_renderer import ScheduleImageRenderer
 from .core.long_term import LongTermTimelineStore, validate_stage_bundle
 from .core.message_generator import ProactiveMessageGenerator
 from .core.message_segmenter import ProactiveMessageSegmenter
-from .core.models import DailyPlan, FollowupTask, ProactiveWindow
+from .core.models import (
+    DailyPlan,
+    FollowupTask,
+    ProactiveWindow,
+    ScheduleRequirement,
+)
 from .core.persona import PersonaContext, PersonaResolver
 from .core.proactive import ProactivePolicy, session_kind
 from .core.runtime import SchedulerRuntime
@@ -35,6 +41,7 @@ from .core.utils import (
     next_available_at,
     now_in,
     parse_datetime,
+    parse_schedule_date_range,
     prune_date_keys,
     timeline_item_at,
 )
@@ -108,6 +115,7 @@ class ProactiveVirtualDailyPlugin(Star):
     async def _refresh_all(self, *, force: bool) -> None:
         async with self.refresh_lock:
             now = self._now()
+            self.storage.prune_schedule_requirements(now.date())
             await self._check_long_term_renewals(now.date())
             grouped: dict[str, tuple[PersonaContext, list[str]]] = {}
             for umo in self.policy.enabled_sessions():
@@ -162,26 +170,111 @@ class ProactiveVirtualDailyPlugin(Star):
                 target,
                 fallback_to_latest=True,
             )
+        schedule_requirements = self.storage.active_schedule_requirements(
+            persona.id, target
+        )
+        requirement_sections = []
+        if extra.strip():
+            requirement_sections.append("本次补充要求：\n" + extra.strip())
+        if schedule_requirements:
+            requirement_sections.append(
+                "预设日程要求：\n"
+                + "\n".join(f"- {item.requirement}" for item in schedule_requirements)
+            )
         plan = await self.plan_generator.generate(
             target,
             persona,
-            extra=extra,
+            extra="\n\n".join(requirement_sections),
             history_plans=history_plans,
             long_term_context=long_term_context,
         )
-        self.storage.plans[self.storage.plan_key(date_str, persona.id)] = plan
-        await self.storage.save_plans()
+        plan_key = self.storage.plan_key(date_str, persona.id)
+        previous_plan = self.storage.plans.get(plan_key)
+        self.storage.plans[plan_key] = plan
+        if plan.status == "ok":
+            self.storage.consume_schedule_requirements(
+                [item.id for item in schedule_requirements], target
+            )
+        try:
+            await self.storage.save_plans()
+        except Exception:
+            if previous_plan is None:
+                self.storage.plans.pop(plan_key, None)
+            else:
+                self.storage.plans[plan_key] = previous_plan
+            for item in schedule_requirements:
+                self.storage.schedule_requirements[item.id] = item
+            raise
         return plan
+
+    async def _add_schedule_requirement(
+        self,
+        event: AstrMessageEvent,
+        date_range: str,
+        requirement: str,
+    ) -> str:
+        if not event.is_admin():
+            return "无权限：仅管理员可以添加日程要求。"
+        today = self._now().date()
+        requirement = str(requirement).strip()
+        try:
+            start, end = parse_schedule_date_range(date_range, today)
+            if start <= today:
+                raise ValueError("只能为今天之后的日期添加日程要求")
+            range_days = (end - start).days + 1
+            if range_days > 366:
+                raise ValueError("日期区间不能超过 366 天")
+            if not requirement:
+                raise ValueError("日程要求不能为空")
+            if len(requirement) > 500:
+                raise ValueError("每条日程要求不能超过 500 字")
+            persona = await self.personas.resolve(event.unified_msg_origin)
+            for offset in range(range_days):
+                target = start + timedelta(days=offset)
+                existing_plan = self.storage.get_plan(target.isoformat(), persona.id)
+                if existing_plan and existing_plan.status == "ok":
+                    raise ValueError(
+                        f"{target.isoformat()} 已有有效日程，无法添加首次生成要求"
+                    )
+                if (
+                    len(self.storage.active_schedule_requirements(persona.id, target))
+                    >= 10
+                ):
+                    raise ValueError(
+                        f"{target.isoformat()} 已有 10 条日程要求，无法继续添加"
+                    )
+        except ValueError as exc:
+            return f"无法添加日程要求：{exc}。"
+
+        item = ScheduleRequirement(
+            id=uuid.uuid4().hex[:12],
+            persona_id=persona.id,
+            start_date=start.isoformat(),
+            end_date=end.isoformat(),
+            requirement=requirement,
+            created_at=self._now().isoformat(),
+        )
+        self.storage.schedule_requirements[item.id] = item
+        try:
+            await self.storage.save_plans()
+        except Exception as exc:
+            self.storage.schedule_requirements.pop(item.id, None)
+            logger.warning(
+                "[Virtual Life] Schedule requirement persistence failed persona=%s: %s",
+                persona.id,
+                exc,
+            )
+            return "日程要求保存失败，请检查日志后重试。"
+        normalized_range = (
+            item.start_date
+            if item.start_date == item.end_date
+            else f"{item.start_date}..{item.end_date}"
+        )
+        return f"已为人格 {persona.id} 添加日程要求：{normalized_range}。"
 
     async def _reschedule_plan_sessions(
         self, persona: PersonaContext, plan: DailyPlan
     ) -> None:
-        """Replace scheduled jobs for every subscribed session using this persona.
-
-        Args:
-            persona: Persona shared by the sessions to update.
-            plan: Newly stored plan whose jobs should be scheduled.
-        """
         for umo in self.policy.enabled_sessions():
             resolved = await self.personas.resolve(umo)
             if resolved.id == persona.id:
@@ -875,6 +968,27 @@ class ProactiveVirtualDailyPlugin(Star):
             else "未找到可取消的回访任务。"
         )
 
+    @filter.llm_tool(name="add_schedule_requirement")
+    async def add_schedule_requirement_tool(
+        self,
+        event: AstrMessageEvent,
+        start_date: str,
+        end_date: str,
+        requirement: str,
+    ) -> str:
+        """仅当当前管理员明确要求时，为当前人格未来日期的首次日程生成添加要求。
+
+        Args:
+            start_date(string): 开始日期，支持 YYYY-MM-DD、MM-DD 或 DD。
+            end_date(string): 结束日期，支持 YYYY-MM-DD、MM-DD 或 DD；省略部分相对开始日期向后推导。
+            requirement(string): 要应用于区间内每个日期首次日程生成的要求，最多 500 字。
+        """
+        return await self._add_schedule_requirement(
+            event,
+            f"{str(start_date).strip()}..{str(end_date).strip()}",
+            requirement,
+        )
+
     @filter.command_group("虚拟人生")
     def virtual_life_group(self):
         """虚拟人生命令组；不提供子命令时由 AstrBot 输出帮助。"""
@@ -908,6 +1022,19 @@ class ProactiveVirtualDailyPlugin(Star):
     def virtual_daily_group(self):
         """虚拟日程命令组；不提供子命令时由 AstrBot 输出帮助。"""
         pass
+
+    @virtual_daily_group.command("要求")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def add_schedule_requirement_command(
+        self,
+        event: AstrMessageEvent,
+        date_range: str,
+        requirement=GreedyStr,
+    ):
+        """为当前人格未来日期的首次日程生成添加要求。"""
+        yield event.plain_result(
+            await self._add_schedule_requirement(event, date_range, requirement)
+        )
 
     @virtual_daily_group.command("查看")
     async def show_schedule(self, event: AstrMessageEvent):

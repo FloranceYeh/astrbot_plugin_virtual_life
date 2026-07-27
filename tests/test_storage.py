@@ -3,7 +3,12 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from core.models import DailyPlan, FollowupTask, SessionState
+from core.models import (
+    DailyPlan,
+    FollowupTask,
+    ScheduleRequirement,
+    SessionState,
+)
 from core.storage import PluginStorage
 
 from tests.fixtures import outfit_payload
@@ -20,14 +25,40 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
                     "theme": "日常",
                     "mood": "平静",
                     "outfit": outfit_payload(),
-                    "timeline": [{"id": "all", "start": "00:00", "end": "24:00", "activity": "休息", "state": "available", "availability": "normal"}],
+                    "timeline": [
+                        {
+                            "id": "all",
+                            "start": "00:00",
+                            "end": "24:00",
+                            "activity": "休息",
+                            "state": "available",
+                            "availability": "normal",
+                        }
+                    ],
                     "proactive_windows": [],
                     "budget_bonus": {"private": 0, "group": 0},
                 }
             )
             storage.plans[storage.plan_key(plan.date, plan.persona_id)] = plan
-            storage.sessions["umo"] = SessionState(date=plan.date, persona_id="alice", daily_budget=2)
-            storage.followups["task"] = FollowupTask("task", "umo", "alice", "2026-07-14T13:00:00+08:00", "问结果", "2026-07-14T12:00:00+08:00")
+            storage.schedule_requirements["req"] = ScheduleRequirement(
+                id="req",
+                persona_id="alice",
+                start_date="2026-07-15",
+                end_date="2026-07-16",
+                requirement="减少外出",
+                created_at="2026-07-14T12:00:00+08:00",
+            )
+            storage.sessions["umo"] = SessionState(
+                date=plan.date, persona_id="alice", daily_budget=2
+            )
+            storage.followups["task"] = FollowupTask(
+                "task",
+                "umo",
+                "alice",
+                "2026-07-14T13:00:00+08:00",
+                "问结果",
+                "2026-07-14T12:00:00+08:00",
+            )
             await storage.save_plans()
             await storage.save_sessions()
             await storage.save_followups()
@@ -35,6 +66,9 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             restored = PluginStorage(Path(directory))
             await restored.load()
             self.assertEqual(restored.get_plan(plan.date, "alice").theme, "日常")
+            self.assertEqual(
+                restored.schedule_requirements["req"].requirement, "减少外出"
+            )
             self.assertEqual(restored.sessions["umo"].daily_budget, 2)
             self.assertEqual(restored.followups["task"].intent, "问结果")
 
@@ -50,7 +84,16 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
                         "theme": theme,
                         "mood": "平静",
                         "outfit": outfit_payload(),
-                        "timeline": [{"id": "all", "start": "00:00", "end": "24:00", "activity": theme, "state": "available", "availability": "normal"}],
+                        "timeline": [
+                            {
+                                "id": "all",
+                                "start": "00:00",
+                                "end": "24:00",
+                                "activity": theme,
+                                "state": "available",
+                                "availability": "normal",
+                            }
+                        ],
                         "proactive_windows": [],
                         "budget_bonus": {"private": 0, "group": 0},
                     }
@@ -87,6 +130,78 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             )
             await storage.load()
             self.assertEqual(storage.plans, {})
+
+    async def test_schedule_requirements_are_persona_scoped_and_consumed_per_day(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = PluginStorage(Path(directory))
+            storage.schedule_requirements["req"] = ScheduleRequirement(
+                id="req",
+                persona_id="alice",
+                start_date="2026-07-15",
+                end_date="2026-07-16",
+                requirement="减少外出",
+                created_at="2026-07-14T12:00:00+08:00",
+            )
+
+            self.assertEqual(
+                [
+                    item.id
+                    for item in storage.active_schedule_requirements(
+                        "alice", date(2026, 7, 15)
+                    )
+                ],
+                ["req"],
+            )
+            self.assertEqual(
+                storage.active_schedule_requirements("bob", date(2026, 7, 15)),
+                [],
+            )
+
+            self.assertEqual(
+                storage.consume_schedule_requirements(["req"], date(2026, 7, 15)),
+                1,
+            )
+            self.assertEqual(
+                storage.active_schedule_requirements("alice", date(2026, 7, 15)),
+                [],
+            )
+            self.assertEqual(
+                [
+                    item.id
+                    for item in storage.active_schedule_requirements(
+                        "alice", date(2026, 7, 16)
+                    )
+                ],
+                ["req"],
+            )
+
+            storage.consume_schedule_requirements(["req"], date(2026, 7, 16))
+            self.assertNotIn("req", storage.schedule_requirements)
+
+    async def test_expired_schedule_requirements_are_pruned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = PluginStorage(Path(directory))
+            storage.schedule_requirements["expired"] = ScheduleRequirement(
+                id="expired",
+                persona_id="alice",
+                start_date="2026-07-14",
+                end_date="2026-07-14",
+                requirement="旧要求",
+                created_at="2026-07-13T12:00:00+08:00",
+            )
+            storage.schedule_requirements["current"] = ScheduleRequirement(
+                id="current",
+                persona_id="alice",
+                start_date="2026-07-15",
+                end_date="2026-07-15",
+                requirement="今日要求",
+                created_at="2026-07-14T12:00:00+08:00",
+            )
+
+            self.assertEqual(storage.prune_schedule_requirements(date(2026, 7, 15)), 1)
+            self.assertEqual(set(storage.schedule_requirements), {"current"})
 
 
 if __name__ == "__main__":

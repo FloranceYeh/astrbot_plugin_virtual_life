@@ -1,9 +1,15 @@
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from core.models import DailyPlan
-from core.utils import format_outfit, format_timeline, next_available_at, timeline_item_at
+from core.utils import (
+    format_outfit,
+    format_timeline,
+    next_available_at,
+    parse_schedule_date_range,
+    timeline_item_at,
+)
 
 from tests.fixtures import outfit_payload
 
@@ -18,9 +24,30 @@ class UtilsTests(unittest.TestCase):
                 "mood": "平静",
                 "outfit": outfit_payload(),
                 "timeline": [
-                    {"id": "sleep", "start": "00:00", "end": "08:00", "activity": "睡觉", "state": "sleep", "availability": "blocked"},
-                    {"id": "busy", "start": "08:00", "end": "12:00", "activity": "工作", "state": "focus", "availability": "low"},
-                    {"id": "free", "start": "12:00", "end": "24:00", "activity": "休息", "state": "available", "availability": "high"},
+                    {
+                        "id": "sleep",
+                        "start": "00:00",
+                        "end": "08:00",
+                        "activity": "睡觉",
+                        "state": "sleep",
+                        "availability": "blocked",
+                    },
+                    {
+                        "id": "busy",
+                        "start": "08:00",
+                        "end": "12:00",
+                        "activity": "工作",
+                        "state": "focus",
+                        "availability": "low",
+                    },
+                    {
+                        "id": "free",
+                        "start": "12:00",
+                        "end": "24:00",
+                        "activity": "休息",
+                        "state": "available",
+                        "availability": "high",
+                    },
                 ],
                 "proactive_windows": [],
                 "budget_bonus": {"private": 0, "group": 0},
@@ -75,6 +102,40 @@ class UtilsTests(unittest.TestCase):
             {"stage": None, "active_periods": [], "holidays": []},
         )
         self.assertIn("当前大时间段：暂无当前阶段", timeline)
+
+    def test_schedule_requirement_date_defaults(self):
+        reference = date(2026, 7, 27)
+        self.assertEqual(
+            parse_schedule_date_range("2026-08-03", reference),
+            (date(2026, 8, 3), date(2026, 8, 3)),
+        )
+        self.assertEqual(
+            parse_schedule_date_range("8-3", reference),
+            (date(2026, 8, 3), date(2026, 8, 3)),
+        )
+        self.assertEqual(
+            parse_schedule_date_range("29", reference),
+            (date(2026, 7, 29), date(2026, 7, 29)),
+        )
+
+    def test_schedule_requirement_range_rolls_month_and_year(self):
+        reference = date(2026, 7, 27)
+        self.assertEqual(
+            parse_schedule_date_range("29..2", reference),
+            (date(2026, 7, 29), date(2026, 8, 2)),
+        )
+        self.assertEqual(
+            parse_schedule_date_range("12-29..1-2", reference),
+            (date(2026, 12, 29), date(2027, 1, 2)),
+        )
+        self.assertEqual(
+            parse_schedule_date_range("2026-12-29..2", reference),
+            (date(2026, 12, 29), date(2027, 1, 2)),
+        )
+
+    def test_schedule_requirement_explicit_reverse_range_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "结束日期不能早于开始日期"):
+            parse_schedule_date_range("2026-08-03..2026-08-02", date(2026, 7, 27))
 
 
 if __name__ == "__main__":

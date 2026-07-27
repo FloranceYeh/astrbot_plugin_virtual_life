@@ -10,7 +10,9 @@ from .models import OUTFIT_CATEGORY_LABELS, DailyPlan, TimelineItem, minute_of_d
 
 
 def extract_json_object(text: str) -> dict:
-    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", str(text).strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"^```(?:json)?\s*|\s*```$", "", str(text).strip(), flags=re.IGNORECASE
+    )
     try:
         value = json.loads(cleaned)
         if isinstance(value, dict):
@@ -69,6 +71,54 @@ def parse_datetime(value: str, timezone: ZoneInfo) -> datetime:
     return parsed.astimezone(timezone)
 
 
+def parse_schedule_date_range(value: str, reference: date) -> tuple[date, date]:
+    endpoints = [item.strip() for item in str(value).split("..")]
+    if len(endpoints) not in (1, 2) or any(not item for item in endpoints):
+        raise ValueError("日期应为 YYYY-MM-DD、MM-DD、DD，或使用 .. 连接的日期区间")
+
+    def parts(endpoint: str) -> list[int]:
+        raw_parts = endpoint.split("-")
+        if not 1 <= len(raw_parts) <= 3 or any(
+            not item.isdigit() for item in raw_parts
+        ):
+            raise ValueError("日期应为 YYYY-MM-DD、MM-DD、DD，或使用 .. 连接的日期区间")
+        return [int(item) for item in raw_parts]
+
+    start_parts = parts(endpoints[0])
+    try:
+        if len(start_parts) == 3:
+            start = date(*start_parts)
+        elif len(start_parts) == 2:
+            start = date(reference.year, *start_parts)
+        else:
+            start = date(reference.year, reference.month, start_parts[0])
+    except ValueError as exc:
+        raise ValueError(f"无效的开始日期：{endpoints[0]}") from exc
+
+    if len(endpoints) == 1:
+        return start, start
+
+    end_parts = parts(endpoints[1])
+    try:
+        if len(end_parts) == 3:
+            end = date(*end_parts)
+        elif len(end_parts) == 2:
+            end = date(start.year, *end_parts)
+            if end < start:
+                end = date(start.year + 1, *end_parts)
+        else:
+            end = date(start.year, start.month, end_parts[0])
+            if end < start:
+                next_year = start.year + (1 if start.month == 12 else 0)
+                next_month = 1 if start.month == 12 else start.month + 1
+                end = date(next_year, next_month, end_parts[0])
+    except ValueError as exc:
+        raise ValueError(f"无效的结束日期：{endpoints[1]}") from exc
+    if end < start:
+        raise ValueError("结束日期不能早于开始日期")
+    return start, end
+
+
 def timeline_item_at(plan: DailyPlan, moment: datetime) -> TimelineItem | None:
     minute = moment.hour * 60 + moment.minute
     for item in plan.timeline:
@@ -84,7 +134,9 @@ def next_available_at(plan: DailyPlan, moment: datetime) -> datetime | None:
             continue
         if item.state != "sleep" and item.availability in {"normal", "high"}:
             hour, minute_value = map(int, item.start.split(":"))
-            return moment.replace(hour=hour, minute=minute_value, second=0, microsecond=0)
+            return moment.replace(
+                hour=hour, minute=minute_value, second=0, microsecond=0
+            )
     return None
 
 
@@ -97,12 +149,20 @@ def format_plan(plan: DailyPlan, moment: datetime | None = None) -> str:
     lines = [
         f"📅 {plan.date} · {plan.theme}",
         f"💭 心情：{plan.mood}",
-        f"👗 穿搭：{plan.outfit.summary}" + (f"（{outfit_items}）" if outfit_items else ""),
+        f"👗 穿搭：{plan.outfit.summary}"
+        + (f"（{outfit_items}）" if outfit_items else ""),
     ]
     if current:
-        lines.append(f"📍 当前：{current.activity}" + (f"（{current.location}）" if current.location else ""))
+        lines.append(
+            f"📍 当前：{current.activity}"
+            + (f"（{current.location}）" if current.location else "")
+        )
     lines.append("📝 日程：")
-    lines.extend(f"- {item.start}-{item.end} {item.activity}" + (f" @ {item.location}" if item.location else "") for item in plan.timeline)
+    lines.extend(
+        f"- {item.start}-{item.end} {item.activity}"
+        + (f" @ {item.location}" if item.location else "")
+        for item in plan.timeline
+    )
     return "\n".join(lines)
 
 
@@ -136,10 +196,13 @@ def format_timeline(
         lines.append("🎉 今日节日：" + "、".join(item["name"] for item in holidays))
     if current:
         location = f" @ {current.location}" if current.location else ""
-        lines.append(f"📍 当前时段：{current.start}-{current.end} {current.activity}{location}")
+        lines.append(
+            f"📍 当前时段：{current.start}-{current.end} {current.activity}{location}"
+        )
     lines.append("📝 24 小时时间轴：")
     lines.extend(
-        f"- {item.start}-{item.end} {item.activity}" + (f" @ {item.location}" if item.location else "")
+        f"- {item.start}-{item.end} {item.activity}"
+        + (f" @ {item.location}" if item.location else "")
         for item in plan.timeline
     )
     return "\n".join(lines)
@@ -162,7 +225,9 @@ def format_outfit(plan: DailyPlan) -> str:
     return "\n".join(lines)
 
 
-def prune_date_keys(values: dict[str, object], keep_days: int, today: date) -> dict[str, object]:
+def prune_date_keys(
+    values: dict[str, object], keep_days: int, today: date
+) -> dict[str, object]:
     threshold = today - timedelta(days=max(1, keep_days))
     result = {}
     for key, value in values.items():

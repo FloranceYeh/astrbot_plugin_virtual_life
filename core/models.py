@@ -281,6 +281,52 @@ class DailyPlan:
         return value
 
 
+@dataclass(slots=True, frozen=True)
+class ScheduleRequirement:
+    """Persisted instruction applied once per date in an inclusive range."""
+
+    id: str
+    persona_id: str
+    start_date: str
+    end_date: str
+    requirement: str
+    created_at: str
+    consumed_dates: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        start = date.fromisoformat(self.start_date)
+        end = date.fromisoformat(self.end_date)
+        if not self.id or not self.persona_id:
+            raise ValueError("requirement id and persona_id are required")
+        if end < start:
+            raise ValueError("requirement end_date must not precede start_date")
+        if not self.requirement:
+            raise ValueError("schedule requirement is required")
+        if len(self.requirement) > 500:
+            raise ValueError("schedule requirement must not exceed 500 characters")
+        if len(set(self.consumed_dates)) != len(self.consumed_dates):
+            raise ValueError("consumed schedule requirement dates must be unique")
+        for value in self.consumed_dates:
+            consumed = date.fromisoformat(value)
+            if not start <= consumed <= end:
+                raise ValueError("consumed date must be inside the requirement range")
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> ScheduleRequirement:
+        return cls(
+            id=str(value.get("id", "")).strip(),
+            persona_id=str(value.get("persona_id", "")).strip(),
+            start_date=str(value.get("start_date", "")).strip(),
+            end_date=str(value.get("end_date", "")).strip(),
+            requirement=str(value.get("requirement", "")).strip(),
+            created_at=str(value.get("created_at", "")).strip(),
+            consumed_dates=tuple(str(item) for item in value.get("consumed_dates", [])),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 @dataclass(slots=True)
 class SessionState:
     date: str
