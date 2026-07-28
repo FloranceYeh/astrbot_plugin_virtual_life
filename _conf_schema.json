@@ -203,6 +203,97 @@
       }
     }
   },
+  "reply_delay_settings": {
+    "description": "⏳ 普通回复延迟",
+    "type": "object",
+    "hint": "根据消息到达时段的可打扰度延迟普通聊天；等待结束后才请求 LLM，并合并等待期间的消息。",
+    "items": {
+      "enable": {
+        "description": "启用回复延迟",
+        "type": "bool",
+        "hint": "仅影响普通聊天；命令、主动消息、回访和日程生成不参与延迟。",
+        "default": true
+      },
+      "notify_user": {
+        "description": "发送等待提示",
+        "type": "bool",
+        "hint": "延迟大于 0 时，每个消息批次发送一次不经过 LLM 的公开提示。",
+        "default": true
+      },
+      "active_conversation_seconds": {
+        "description": "连续对话免延迟窗口",
+        "type": "int",
+        "hint": "普通 LLM 回复成功发送后的免延迟秒数；每次成功回复后刷新，0 表示关闭。",
+        "default": 120
+      },
+      "max_delay_seconds": {
+        "description": "最长回复延迟",
+        "type": "int",
+        "hint": "公式结果的全局上限，单位为秒；实际延迟还会被当前日程时段结尾截断。",
+        "default": 1800
+      },
+      "delay_formulas": {
+        "description": "各可打扰度延迟公式",
+        "type": "object",
+        "hint": "结果单位为秒。变量：remaining、message_length；函数：random、min、max、round、ceil、floor；支持 + - * / 和括号。",
+        "items": {
+          "blocked": {
+            "description": "禁止打扰",
+            "type": "string",
+            "default": "remaining"
+          },
+          "low": {
+            "description": "低可打扰",
+            "type": "string",
+            "default": "random(60, 300)"
+          },
+          "normal": {
+            "description": "普通可打扰",
+            "type": "string",
+            "default": "random(5, 30)"
+          },
+          "high": {
+            "description": "高可打扰",
+            "type": "string",
+            "default": "random(0, 3)"
+          }
+        }
+      },
+      "public_reasons": {
+        "description": "公开等待原因",
+        "type": "object",
+        "hint": "仅用于发给用户的提示，不会自动暴露具体活动或地点。",
+        "items": {
+          "blocked": {
+            "description": "禁止打扰",
+            "type": "string",
+            "default": "当前不方便被打扰"
+          },
+          "low": {
+            "description": "低可打扰",
+            "type": "string",
+            "default": "当前不太方便回复"
+          },
+          "normal": {
+            "description": "普通可打扰",
+            "type": "string",
+            "default": "当前正在处理手头的事情"
+          },
+          "high": {
+            "description": "高可打扰",
+            "type": "string",
+            "default": "当前可以回复，但会稍作停顿"
+          }
+        }
+      },
+      "notification_template": {
+        "description": "等待提示模板",
+        "type": "string",
+        "hint": "可使用 {delay_seconds}、{public_reason}、{availability}；无法引用具体活动和地点。",
+        "default": "预计 {delay_seconds} 秒后回复，原因：{public_reason}。"
+      }
+    }
+  },
   "smart_context_injection": {
     "description": "🧠 智能注入",
     "type": "object",

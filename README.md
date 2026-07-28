@@ -91,6 +91,11 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 - `smart_context_injection.max_chars`：注入内容总字符上限，默认 `1600`，可设置 `400-8000`
 - `smart_context_injection.long_term_milestone_days`：注入近期里程碑的未来天数，默认 `7`，可设置 `0-90`
 - `smart_context_injection` 直接读取配置中的穿搭、内衣、日程、大时间表、完整日程和完整大时间表关键词列表；列表为空时对应模块不会触发
+- `reply_delay_settings.enable`：按消息到达时段的可打扰度延迟普通聊天，默认启用；等待结束后才请求 LLM
+- `reply_delay_settings.notify_user`：每个有延迟的消息批次发送一次公开等待提示，默认启用
+- `reply_delay_settings.active_conversation_seconds`：普通 LLM 回复成功发送后的免延迟窗口，默认 `120` 秒；设为 `0` 可关闭
+- `reply_delay_settings.max_delay_seconds`：全局最长回复延迟，默认 `1800` 秒；实际延迟不会超过当前日程时段结尾
+- `reply_delay_settings.delay_formulas`：分别配置 `blocked/low/normal/high` 的延迟秒数公式
 - `prompt_settings.schedule_generation_system_prompt` 与 `prompt_settings.outfit_generation_system_prompt` 控制结构约束；完整日程使用 `prompt_settings.complete_generation_prompt_template`，局部重写使用对应的日程或穿搭模板
 - 私聊随机预算：`1-3`，LLM 最多增加 `2`，硬上限 `5`
 - 群聊随机预算：`0-1`，LLM 最多增加 `1`，硬上限 `2`
@@ -152,6 +157,27 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 日程要求按当前人格共享，只允许管理员通过命令或 LLM Tool 添加。命令日期支持 `YYYY-MM-DD`、`MM-DD` 和 `DD`，也可用 `..` 表示首尾均包含的区间，例如 `/虚拟日程 要求 7-29..8-2 减少远途活动`。省略年份时使用今年，省略月份时使用本月；右端省略部分且早于左端时自动推导到下一月或下一年，例如 `29..2` 表示本月 29 日至下月 2 日。只接受今天之后的日期，区间最长 366 天；每条最多 500 字，同一人格的任一日期最多叠加 10 条。
 
 区间内每个日期首次成功生成并保存日程后，只消费该日期对应的一次使用机会；生成失败时保留，成功后的当天重写不会再次应用。整个区间过期后，未消费的要求会自动清理。`add_schedule_requirement` 仅可在当前管理员明确提出要求时调用，参数为 `start_date`、`end_date` 和 `requirement`。
+
+## 普通回复延迟
+
+启用 `reply_delay_settings` 后，普通私聊和群聊会按第一条消息到达时生效的日程项计算回复延迟。命令、主动消息、回访、日程生成以及其他插件显式构造的 LLM 请求不参与延迟。当天没有内存中的有效日程时直接放行，避免为了计算延迟而提前请求日程生成 LLM。
+
+每个 UMO 独立维护消息队列和固定截止时间。第一条消息创建批次并计算一次延迟；截止时间前到达的后续消息只进入同一队列，不重新计算或延长延迟。截止时刻原子地摘取整批消息并合并为一个用户轮次，只发起一次 LLM 请求。群聊按整个群合并，并保留成员和消息时间；图片与音频附件也会并入最终请求。截止时刻之后到达的消息进入新批次，同一会话的 LLM 请求串行执行。
+
+四档默认公式的结果单位均为秒：
+
+```text
+high:    random(0, 3)
+normal:  random(5, 30)
+low:     random(60, 300)
+blocked: remaining
+```
+
+公式变量支持 `remaining`（当前时段剩余秒数）和 `message_length`（首条消息文本长度）；函数支持 `random`、`min`、`max`、`round`、`ceil`、`floor`，运算符支持 `+ - * /` 和括号。表达式由受限解析器计算，不执行 Python 代码；缺失或非法公式会记录错误并让该批次直接结算，不使用代码内置回退值。最终延迟固定按 `min(公式结果, remaining, max_delay_seconds)` 截断，因此时段结束时立即结算。
+
+有实际延迟时，插件按 `notification_template` 和 `public_reasons` 发送一次不经过 LLM 的提示；公开模板只能引用 `{delay_seconds}`、`{public_reason}` 和 `{availability}`，不会自动暴露具体活动或地点。结算时会把消息到达时与当前的具体日程状态、计划及实际等待时间作为临时上下文提供给 LLM，并要求模型保持角色一致且不主动披露内部细节。
+
+普通 LLM 回复成功发送后，会开启默认 `120` 秒的连续对话窗口；窗口内的新批次延迟为 `0`，每次成功回复后重新计时，沉寂超时后恢复公式延迟。等待批次和连续对话窗口只保存在内存中，插件重启后不会恢复。
 
 ## 智能状态注入
 
