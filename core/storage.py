@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from .models import DailyPlan, FollowupTask, ScheduleRequirement, SessionState
+from .models import DailyPlan, ScheduleRequirement, SessionState
 
 
 class JsonRepository:
@@ -49,18 +49,13 @@ class PluginStorage:
         self.sessions_repo = JsonRepository(
             data_dir / "sessions.json", {"schema_version": 1, "sessions": {}}
         )
-        self.followups_repo = JsonRepository(
-            data_dir / "followups.json", {"schema_version": 1, "tasks": {}}
-        )
         self.plans: dict[str, DailyPlan] = {}
         self.schedule_requirements: dict[str, ScheduleRequirement] = {}
         self.sessions: dict[str, SessionState] = {}
-        self.followups: dict[str, FollowupTask] = {}
 
     async def load(self) -> None:
         plans = await self.plans_repo.load()
         sessions = await self.sessions_repo.load()
-        followups = await self.followups_repo.load()
         self.plans = {}
         for key, value in plans.get("plans", {}).items():
             try:
@@ -77,10 +72,6 @@ class PluginStorage:
         self.sessions = {
             key: SessionState.from_dict(value)
             for key, value in sessions.get("sessions", {}).items()
-        }
-        self.followups = {
-            key: FollowupTask.from_dict(value)
-            for key, value in followups.get("tasks", {}).items()
         }
 
     @staticmethod
@@ -170,16 +161,6 @@ class PluginStorage:
                 "schema_version": 1,
                 "sessions": {
                     key: value.to_dict() for key, value in self.sessions.items()
-                },
-            }
-        )
-
-    async def save_followups(self) -> None:
-        await self.followups_repo.save(
-            {
-                "schema_version": 1,
-                "tasks": {
-                    key: value.to_dict() for key, value in self.followups.items()
                 },
             }
         )

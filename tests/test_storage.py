@@ -5,7 +5,6 @@ from pathlib import Path
 
 from core.models import (
     DailyPlan,
-    FollowupTask,
     ScheduleRequirement,
     SessionState,
 )
@@ -51,17 +50,8 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             storage.sessions["umo"] = SessionState(
                 date=plan.date, persona_id="alice", daily_budget=2
             )
-            storage.followups["task"] = FollowupTask(
-                "task",
-                "umo",
-                "alice",
-                "2026-07-14T13:00:00+08:00",
-                "问结果",
-                "2026-07-14T12:00:00+08:00",
-            )
             await storage.save_plans()
             await storage.save_sessions()
-            await storage.save_followups()
 
             restored = PluginStorage(Path(directory))
             await restored.load()
@@ -70,7 +60,6 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
                 restored.schedule_requirements["req"].requirement, "减少外出"
             )
             self.assertEqual(restored.sessions["umo"].daily_budget, 2)
-            self.assertEqual(restored.followups["task"].intent, "问结果")
 
     async def test_recent_plans_are_persona_isolated_and_ordered(self):
         with tempfile.TemporaryDirectory() as directory:

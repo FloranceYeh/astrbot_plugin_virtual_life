@@ -211,7 +211,7 @@
       "enable": {
         "description": "启用回复延迟",
         "type": "bool",
-        "hint": "仅影响普通聊天；命令、主动消息、回访和日程生成不参与延迟。",
+        "hint": "仅影响普通聊天；命令、主动消息和日程生成不参与延迟。",
         "default": true
       },
       "notify_user": {
@@ -307,7 +307,7 @@
       "base_module_enable": {
         "description": "注入基础状态",
         "type": "bool",
-        "hint": "始终注入当前时间、活动、地点、状态和回访约束；关闭后只注入关键词命中的模块。",
+        "hint": "始终注入当前时间、活动、地点和状态；关闭后只注入关键词命中的模块。",
         "default": false
       },
       "max_chars": {
@@ -557,7 +557,7 @@
       "proactive_window_jitter_minutes": {
         "description": "主动窗口随机偏移",
         "type": "int",
-        "hint": "日程主动窗口在计划时间前后随机偏移的分钟数，范围 0-60；用户委托回访不受影响。",
+        "hint": "日程主动窗口在计划时间前后随机偏移的分钟数，范围 0-60。",
         "default": 15
       },
       "segmented_reply_settings": {
@@ -681,30 +681,6 @@
         "type": "text",
         "hint": "可使用 {current_time}、{current_state}、{intent}、{unanswered_count}。",
         "default": "你需要以当前人格自然地发起一条主动消息。当前时间：{current_time}。当前状态：{current_state}。触发原因：{intent}。连续未获回应：{unanswered_count} 次。结合会话历史，只输出要发送的消息正文，不要解释任务。"
-      }
-    }
-  },
-  "followup_settings": {
-    "description": "⏰ 回访",
-    "type": "object",
-    "items": {
-      "enable": {
-        "description": "启用回访工具",
-        "type": "bool",
-        "hint": "允许模型在用户明确委托时创建定时回访。",
-        "default": true
-      },
-      "misfire_grace_minutes": {
-        "description": "补发容忍窗口",
-        "type": "int",
-        "hint": "插件重启后仍允许补发的最大延迟，单位为分钟。",
-        "default": 30
-      },
-      "max_pending_per_session": {
-        "description": "会话待回访上限",
-        "type": "int",
-        "hint": "单个会话同时保留的回访任务最大数量。",
-        "default": 10
       }
     }
   }

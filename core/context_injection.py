@@ -125,8 +125,7 @@ class SmartContextInjector:
             f"当前活动：{current.activity}\n"
             f"地点：{current.location or '未说明'}\n"
             f"状态：{current.state}，可打扰度：{current.availability}\n"
-            "普通回复必须与当前状态保持一致。只有用户明确要求稍后提醒、到点联系或询问后续时，"
-            "才可调用 schedule_proactive_followup；用户提前汇报结果时，应先查询并取消对应回访。"
+            "普通回复必须与当前状态保持一致。"
         )
 
     def _schedule_section(self, plan: DailyPlan, now: datetime, current: TimelineItem) -> str:

@@ -24,7 +24,6 @@ from .core.message_generator import ProactiveMessageGenerator
 from .core.message_segmenter import ProactiveMessageSegmenter
 from .core.models import (
     DailyPlan,
-    FollowupTask,
     ProactiveWindow,
     ScheduleRequirement,
 )
@@ -47,7 +46,6 @@ from .core.utils import (
     format_timeline,
     next_available_at,
     now_in,
-    parse_datetime,
     parse_schedule_date_range,
     prune_date_keys,
     timeline_item_at,
@@ -107,7 +105,6 @@ class ProactiveVirtualDailyPlugin(Star):
         generate_time = str(schedule_settings.get("generate_time", "07:00"))
         self.runtime.start(generate_time, self._daily_refresh)
         await self._refresh_all(force=False)
-        await self._restore_followups()
         logger.info("[虚拟人生] 插件已启动，时区=%s", self.timezone.key)
 
     async def terminate(self) -> None:
@@ -122,7 +119,6 @@ class ProactiveVirtualDailyPlugin(Star):
                 lock.release()
         await self.storage.save_plans()
         await self.storage.save_sessions()
-        await self.storage.save_followups()
 
     @staticmethod
     def _umo_hash(umo: str) -> str:
@@ -599,31 +595,6 @@ class ProactiveVirtualDailyPlugin(Star):
             if index + 1 < len(result.segments):
                 await asyncio.sleep(self.message_segmenter.interval_for(segment))
 
-    async def _restore_followups(self) -> None:
-        now = self._now()
-        grace = max(
-            1,
-            int(
-                (self.config.get("followup_settings", {}) or {}).get(
-                    "misfire_grace_minutes", 30
-                )
-            ),
-        )
-        changed = False
-        for task in self.storage.followups.values():
-            if task.status != "pending":
-                continue
-            scheduled = parse_datetime(task.scheduled_at, self.timezone)
-            if scheduled < now - timedelta(minutes=grace):
-                task.status = "missed"
-                changed = True
-                continue
-            self._schedule_followup_job(
-                task, max(scheduled, now + timedelta(seconds=2))
-            )
-        if changed:
-            await self.storage.save_followups()
-
     async def _check_long_term_renewals(self, target: date) -> None:
         settings = self.config.get("long_term_settings", {}) or {}
         if not settings.get("enable", True):
@@ -692,95 +663,6 @@ class ProactiveVirtualDailyPlugin(Star):
         except Exception as exc:
             logger.error("[虚拟人生] 管理员通知发送失败 %s: %s", umo, exc)
 
-    def _schedule_followup_job(self, task: FollowupTask, run_at: datetime) -> None:
-        grace = max(
-            1,
-            int(
-                (self.config.get("followup_settings", {}) or {}).get(
-                    "misfire_grace_minutes", 30
-                )
-            ),
-        )
-        self.runtime.add_date_job(
-            f"pvd:followup:{task.id}",
-            run_at,
-            self._run_followup,
-            task.id,
-            misfire_grace_time=grace * 60,
-        )
-
-    async def _create_followup(
-        self, umo: str, scheduled_at: str, intent: str
-    ) -> FollowupTask:
-        settings = self.config.get("followup_settings", {}) or {}
-        if not settings.get("enable", True):
-            raise ValueError("回访功能未启用")
-        run_at = parse_datetime(scheduled_at, self.timezone)
-        if run_at <= self._now():
-            raise ValueError("回访时间必须晚于当前时间")
-        pending = [
-            task
-            for task in self.storage.followups.values()
-            if task.umo == umo and task.status == "pending"
-        ]
-        if len(pending) >= max(1, int(settings.get("max_pending_per_session", 10))):
-            raise ValueError("当前会话待执行回访数量已达上限")
-        persona = await self.personas.resolve(umo)
-        task = FollowupTask(
-            id=uuid.uuid4().hex[:12],
-            umo=umo,
-            persona_id=persona.id,
-            scheduled_at=run_at.isoformat(),
-            intent=intent.strip(),
-            created_at=self._now().isoformat(),
-        )
-        if not task.intent:
-            raise ValueError("回访意图不能为空")
-        self.storage.followups[task.id] = task
-        await self.storage.save_followups()
-        self._schedule_followup_job(task, run_at)
-        return task
-
-    async def _run_followup(self, task_id: str) -> None:
-        task = self.storage.followups.get(task_id)
-        if not task or task.status != "pending":
-            return
-        for attempt in range(3):
-            try:
-                persona, plan = await self._ensure_plan_for_umo(task.umo)
-                await self._deliver(
-                    task.umo, persona, plan, "用户明确委托的回访：" + task.intent, 0
-                )
-                task.status = "completed"
-                break
-            except Exception as exc:
-                task.last_error = str(exc)
-                if attempt < 2:
-                    await asyncio.sleep(2 + attempt * 3)
-                    continue
-                task.status = "failed"
-                logger.error("[虚拟人生] 回访 %s 发送失败: %s", task.id, exc)
-        await self.storage.save_followups()
-
-    async def _cancel_followup(self, umo: str, task_id: str) -> bool:
-        task = self.storage.followups.get(task_id)
-        if not task or task.umo != umo or task.status != "pending":
-            return False
-        task.status = "cancelled"
-        self.runtime.remove(f"pvd:followup:{task.id}")
-        await self.storage.save_followups()
-        return True
-
-    def _pending_followups(self, umo: str) -> list[FollowupTask]:
-        return sorted(
-            (
-                task
-                for task in self.storage.followups.values()
-                if task.umo == umo and task.status == "pending"
-            ),
-            key=lambda task: task.scheduled_at,
-        )
-
     def _scheduled_proactive_entries(
         self, umo: str, plan: DailyPlan
     ) -> list[tuple[datetime, str]]:
@@ -814,13 +696,6 @@ class ProactiveVirtualDailyPlugin(Star):
                 entries.append(
                     (run_at, label + (f" · {window.intent}" if window else ""))
                 )
-
-        for task in self._pending_followups(umo):
-            run_at = job_times.get(
-                f"pvd:followup:{task.id}",
-                parse_datetime(task.scheduled_at, self.timezone),
-            )
-            entries.append((run_at, f"用户回访 [{task.id}] · {task.intent}"))
 
         return sorted(entries, key=lambda item: (item[0], item[1]))
 
@@ -1130,42 +1005,6 @@ class ProactiveVirtualDailyPlugin(Star):
         enriched = [self.long_term.with_holidays(stage) for stage in stages]
         return json.dumps(
             {"persona_id": persona.id, "stages": enriched}, ensure_ascii=False, indent=2
-        )
-
-    @filter.llm_tool(name="schedule_proactive_followup")
-    async def schedule_proactive_followup(
-        self, event: AstrMessageEvent, scheduled_at: str, intent: str
-    ) -> str:
-        """仅在用户明确要求稍后联系、提醒或询问结果时创建一次回访。scheduled_at 必须是明确的 ISO 8601 时间；时间不明确时先询问用户。"""
-        try:
-            task = await self._create_followup(
-                event.unified_msg_origin, scheduled_at, intent
-            )
-            return f"已安排回访，任务 ID={task.id}，时间={task.scheduled_at}。"
-        except ValueError as exc:
-            return f"无法安排回访：{exc}"
-
-    @filter.llm_tool(name="list_proactive_followups")
-    async def list_proactive_followups(self, event: AstrMessageEvent) -> str:
-        """列出当前会话所有待执行的主动回访任务。"""
-        tasks = self._pending_followups(event.unified_msg_origin)
-        return (
-            "当前没有待执行回访。"
-            if not tasks
-            else "\n".join(
-                f"{task.id} | {task.scheduled_at} | {task.intent}" for task in tasks
-            )
-        )
-
-    @filter.llm_tool(name="cancel_proactive_followup")
-    async def cancel_proactive_followup(
-        self, event: AstrMessageEvent, task_id: str
-    ) -> str:
-        """当用户取消请求或已经提前汇报结果时，取消当前会话指定的回访任务。"""
-        return (
-            "已取消回访。"
-            if await self._cancel_followup(event.unified_msg_origin, task_id)
-            else "未找到可取消的回访任务。"
         )
 
     @filter.llm_tool(name="add_schedule_requirement")
@@ -1619,10 +1458,9 @@ class ProactiveVirtualDailyPlugin(Star):
         state = self.policy.ensure_state(
             event.unified_msg_origin, persona.id, plan, self._now()
         )
-        pending = len(self._pending_followups(event.unified_msg_origin))
         yield event.plain_result(
             f"人格：{persona.id}\n今日预算：{state.sent_count}/{state.daily_budget}\n"
-            f"连续未回复：{state.unanswered_count}\n待执行回访：{pending}"
+            f"连续未回复：{state.unanswered_count}"
         )
 
     @proactive_group.command("立即")
@@ -1633,14 +1471,6 @@ class ProactiveVirtualDailyPlugin(Star):
             event.unified_msg_origin, persona, plan, "管理员要求立即测试主动消息", 0
         )
         yield event.plain_result("测试主动消息已发送。")
-
-    @proactive_group.command("回访列表")
-    async def followup_list_command(self, event: AstrMessageEvent):
-        yield event.plain_result(await self.list_proactive_followups(event))
-
-    @proactive_group.command("取消回访")
-    async def followup_cancel_command(self, event: AstrMessageEvent, task_id: str):
-        yield event.plain_result(await self.cancel_proactive_followup(event, task_id))
 
     @proactive_group.command("执行时间")
     async def proactive_execution_times(self, event: AstrMessageEvent):

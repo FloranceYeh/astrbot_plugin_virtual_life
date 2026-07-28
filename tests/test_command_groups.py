@@ -38,10 +38,16 @@ class CommandGroupContractTests(unittest.TestCase):
 
     def test_proactive_commands_share_group(self):
         self.assertIn('@filter.command_group("主动消息")', self.source)
-        for command in ("状态", "立即", "回访列表", "取消回访", "执行时间"):
+        for command in ("状态", "立即", "执行时间"):
             self.assertIn(f'@proactive_group.command("{command}")', self.source)
         for legacy in ("主动消息状态", "立即主动", "回访列表", "取消回访"):
             self.assertNotIn(f'@filter.command("{legacy}")', self.source)
+        self.assertNotIn('@proactive_group.command("回访列表")', self.source)
+        self.assertNotIn('@proactive_group.command("取消回访")', self.source)
+        self.assertNotIn("schedule_proactive_followup", self.source)
+        self.assertNotIn("list_proactive_followups", self.source)
+        self.assertNotIn("cancel_proactive_followup", self.source)
+        self.assertNotIn("_pending_followups", self.source)
         self.assertIn("self.runtime.scheduled_jobs()", self.source)
 
     def test_long_term_commands_share_group(self):
@@ -77,6 +83,7 @@ class CommandGroupContractTests(unittest.TestCase):
 
     def test_default_prompt_requires_structured_outfit(self):
         schema = json.loads(Path("_conf_schema.json").read_text(encoding="utf-8"))
+        self.assertNotIn("followup_settings", schema)
         settings = schema["schedule_settings"]["items"]
         prompt_group = schema["prompt_settings"]
         prompts = prompt_group["items"]
