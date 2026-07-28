@@ -229,7 +229,7 @@
       "max_delay_seconds": {
         "description": "最长回复延迟",
         "type": "int",
-        "hint": "单位为秒，必须为非负整数。公式结果先向上取整并限制为不小于 0，再按 min(公式结果, remaining, max_delay_seconds) 截断；因此实际等待不会超过此值，也不会跨过消息到达时所在日程时段的结尾。设为 0 会使所有公式的最终延迟均为 0。",
+        "hint": "公式结果的全局上限，单位为秒；实际延迟还会被当前日程时段结尾截断。",
         "default": 1800
       },
       "delay_formulas": {
