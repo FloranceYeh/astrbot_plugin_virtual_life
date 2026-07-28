@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.message_components import Image, Record, Reply
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.agent.message import TextPart
 from astrbot.core.config.astrbot_config import AstrBotConfig
@@ -86,9 +87,6 @@ class ProactiveVirtualDailyPlugin(Star):
         self.refresh_lock = asyncio.Lock()
         self.delivery_locks: dict[str, asyncio.Lock] = {}
         self.renewal_attempts: dict[str, int] = {}
-        self.reply_request_locks: dict[str, asyncio.Lock] = {}
-        self.reply_request_owners: dict[str, object] = {}
-        self.reply_request_watchdogs: dict[object, asyncio.Task] = {}
 
     def _resolve_timezone(self) -> ZoneInfo:
         try:
@@ -110,13 +108,6 @@ class ProactiveVirtualDailyPlugin(Star):
     async def terminate(self) -> None:
         self.runtime.stop()
         self.reply_delay_coordinator.clear()
-        for task in self.reply_request_watchdogs.values():
-            task.cancel()
-        self.reply_request_watchdogs.clear()
-        self.reply_request_owners.clear()
-        for lock in self.reply_request_locks.values():
-            if lock.locked():
-                lock.release()
         await self.storage.save_plans()
         await self.storage.save_sessions()
 
@@ -766,13 +757,13 @@ class ProactiveVirtualDailyPlugin(Star):
     async def _prepare_reply_delay(
         self,
         event: AstrMessageEvent,
-        req: ProviderRequest,
-    ) -> bool:
+    ) -> None:
+        excluded = event.get_extra("provider_request") is not None
+        event.set_extra("virtual_life_reply_delay_excluded", excluded)
+        if excluded:
+            return
         if not self.reply_delay_policy.enabled:
-            return True
-        if event.get_extra("provider_request") is not None:
-            event.set_extra("virtual_life_reply_delay_excluded", True)
-            return True
+            return
         try:
             received_at = datetime.fromtimestamp(float(event.created_at), self.timezone)
         except (AttributeError, TypeError, ValueError, OSError):
@@ -781,7 +772,7 @@ class ProactiveVirtualDailyPlugin(Star):
             persona = await self.personas.resolve(event.unified_msg_origin)
         except Exception:
             logger.exception("[虚拟人生] 回复延迟跳过：人格解析失败")
-            return True
+            return
         plan = self.storage.get_plan(received_at.date().isoformat(), persona.id)
         if not plan or plan.status != "ok":
             logger.info(
@@ -789,10 +780,10 @@ class ProactiveVirtualDailyPlugin(Star):
                 persona.id,
                 received_at.date().isoformat(),
             )
-            return True
+            return
         arrival_item = timeline_item_at(plan, received_at)
         if arrival_item is None:
-            return True
+            return
 
         active = self.reply_delay_coordinator.is_active(
             event.unified_msg_origin,
@@ -815,9 +806,14 @@ class ProactiveVirtualDailyPlugin(Star):
             received_at=received_at,
             sender_id=event.get_sender_id(),
             sender_name=event.get_sender_name(),
-            prompt=str(req.prompt or event.get_message_str() or ""),
-            image_urls=tuple(req.image_urls or ()),
-            audio_urls=tuple(req.audio_urls or ()),
+            prompt=str(event.get_message_str() or ""),
+            image_urls=self._message_media_urls(event, Image),
+            audio_urls=self._message_media_urls(event, Record),
+            temporary_files=tuple(
+                str(path)
+                for path in getattr(event, "_temporary_local_files", ())
+                if path
+            ),
         )
         batch, primary = await self.reply_delay_coordinator.enqueue(
             event.unified_msg_origin,
@@ -826,6 +822,7 @@ class ProactiveVirtualDailyPlugin(Star):
             arrival_item,
         )
         if not primary:
+            self._detach_temporary_files(event, queued.temporary_files)
             event.stop_event()
             logger.info(
                 "[虚拟人生] 消息已加入回复延迟批次 umo=%s queued=%s deadline=%s",
@@ -833,7 +830,7 @@ class ProactiveVirtualDailyPlugin(Star):
                 len(batch.messages),
                 batch.deadline.isoformat(),
             )
-            return False
+            return
 
         if decision.delay_seconds > 0 and self.reply_delay_policy.notify_user:
             notification = self.reply_delay_policy.notification(decision)
@@ -847,22 +844,11 @@ class ProactiveVirtualDailyPlugin(Star):
                     logger.exception("[虚拟人生] 回复延迟提示发送失败")
 
         messages = await self.reply_delay_coordinator.settle(batch, self._now())
-        req.prompt = format_queued_messages(
-            messages,
-            group=session_kind(event.unified_msg_origin) == "group",
-        )
-        req.image_urls = [url for message in messages for url in message.image_urls]
-        req.audio_urls = [url for message in messages for url in message.audio_urls]
         settled_at = self._now()
-        current_plan = self.storage.get_plan(settled_at.date().isoformat(), persona.id)
-        current_item = (
-            timeline_item_at(current_plan, settled_at)
-            if current_plan and current_plan.status == "ok"
-            else None
-        )
-        delay_context = format_delay_context(batch, settled_at, current_item)
-        req.extra_user_content_parts.append(TextPart(text=delay_context).mark_as_temp())
         event.set_extra("virtual_life_reply_delay_batch", batch)
+        event.set_extra("virtual_life_reply_delay_messages", messages)
+        event.set_extra("virtual_life_reply_delay_persona_id", persona.id)
+        event.set_extra("virtual_life_reply_delay_settled_at", settled_at)
         logger.info(
             "[虚拟人生] 回复延迟批次开始结算 umo=%s availability=%s planned=%ss actual=%ss queued=%s",
             event.unified_msg_origin,
@@ -871,44 +857,68 @@ class ProactiveVirtualDailyPlugin(Star):
             max(0, int((settled_at - batch.created_at).total_seconds())),
             len(messages),
         )
-        return True
 
-    async def _acquire_reply_request(self, event: AstrMessageEvent) -> None:
-        umo = event.unified_msg_origin
-        lock = self.reply_request_locks.setdefault(umo, asyncio.Lock())
-        await lock.acquire()
-        token = object()
-        self.reply_request_owners[umo] = token
-        event.set_extra("virtual_life_reply_request_owner", (umo, token))
-        self.reply_request_watchdogs[token] = asyncio.create_task(
-            self._reply_request_watchdog(umo, token)
-        )
+    @staticmethod
+    def _message_media_urls(
+        event: AstrMessageEvent, media_type: type
+    ) -> tuple[str, ...]:
+        components = []
+        for component in event.get_messages():
+            components.append(component)
+            if isinstance(component, Reply) and component.chain:
+                components.extend(component.chain)
+        urls = []
+        for component in components:
+            if not isinstance(component, media_type):
+                continue
+            value = component.path or component.url or component.file
+            if value and str(value) not in urls:
+                urls.append(str(value))
+        return tuple(urls)
 
-    async def _reply_request_watchdog(self, umo: str, token: object) -> None:
-        try:
-            await asyncio.sleep(600)
-        except asyncio.CancelledError:
+    @staticmethod
+    def _detach_temporary_files(
+        event: AstrMessageEvent,
+        temporary_files: tuple[str, ...],
+    ) -> None:
+        tracked = getattr(event, "_temporary_local_files", None)
+        if not isinstance(tracked, list):
             return
-        if self._release_reply_request(umo, token):
-            logger.warning("[虚拟人生] LLM 请求锁超时释放 umo=%s", umo)
+        for path in temporary_files:
+            while path in tracked:
+                tracked.remove(path)
 
-    def _release_reply_request(self, umo: str, token: object) -> bool:
-        if self.reply_request_owners.get(umo) is not token:
-            return False
-        self.reply_request_owners.pop(umo, None)
-        task = self.reply_request_watchdogs.pop(token, None)
-        if task and task is not asyncio.current_task():
-            task.cancel()
-        lock = self.reply_request_locks.get(umo)
-        if lock and lock.locked():
-            lock.release()
-        return True
-
-    def _release_reply_request_for_event(self, event: AstrMessageEvent) -> bool:
-        owner = event.get_extra("virtual_life_reply_request_owner")
-        if not isinstance(owner, tuple) or len(owner) != 2:
-            return False
-        return self._release_reply_request(owner[0], owner[1])
+    def _apply_reply_delay_batch(
+        self,
+        event: AstrMessageEvent,
+        req: ProviderRequest,
+    ) -> None:
+        batch = event.get_extra("virtual_life_reply_delay_batch")
+        messages = event.get_extra("virtual_life_reply_delay_messages")
+        settled_at = event.get_extra("virtual_life_reply_delay_settled_at")
+        persona_id = event.get_extra("virtual_life_reply_delay_persona_id")
+        if not batch or not messages or not isinstance(settled_at, datetime):
+            return
+        req.prompt = format_queued_messages(
+            messages,
+            group=session_kind(event.unified_msg_origin) == "group",
+        )
+        req.image_urls = [url for message in messages for url in message.image_urls]
+        req.audio_urls = [url for message in messages for url in message.audio_urls]
+        for message in messages:
+            for path in message.temporary_files:
+                event.track_temporary_local_file(path)
+        current_plan = self.storage.get_plan(
+            settled_at.date().isoformat(),
+            str(persona_id),
+        )
+        current_item = (
+            timeline_item_at(current_plan, settled_at)
+            if current_plan and current_plan.status == "ok"
+            else None
+        )
+        delay_context = format_delay_context(batch, settled_at, current_item)
+        req.extra_user_content_parts.append(TextPart(text=delay_context).mark_as_temp())
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE, priority=999)
     async def on_friend_message(self, event: AstrMessageEvent) -> None:
@@ -925,16 +935,18 @@ class ProactiveVirtualDailyPlugin(Star):
         await self.storage.save_sessions()
         self._schedule_idle(umo)
 
+    @filter.on_waiting_llm_request()
+    async def queue_reply_delay(self, event: AstrMessageEvent) -> None:
+        await self._prepare_reply_delay(event)
+
     @filter.on_llm_request()
     async def inject_virtual_state(
         self, event: AstrMessageEvent, req: ProviderRequest
     ) -> None:
-        if not await self._prepare_reply_delay(event, req):
-            return
+        self._apply_reply_delay_batch(event, req)
         if self.reply_delay_policy.enabled and not event.get_extra(
             "virtual_life_reply_delay_excluded", False
         ):
-            await self._acquire_reply_request(event)
             event.set_extra("virtual_life_ordinary_llm_request", True)
         if not self.smart_context_injector.enabled:
             return
@@ -971,8 +983,6 @@ class ProactiveVirtualDailyPlugin(Star):
             return
         if response is not None and str(response.completion_text or "").strip():
             event.set_extra("virtual_life_ordinary_llm_succeeded", True)
-            return
-        self._release_reply_request_for_event(event)
 
     @filter.after_message_sent()
     async def mark_active_conversation(self, event: AstrMessageEvent) -> None:
@@ -983,7 +993,6 @@ class ProactiveVirtualDailyPlugin(Star):
             self._now(),
             self.reply_delay_policy.active_conversation_seconds,
         )
-        self._release_reply_request_for_event(event)
 
     @filter.llm_tool(name="get_virtual_daily_schedule")
     async def get_virtual_daily_schedule(self, event: AstrMessageEvent) -> str:
@@ -1056,6 +1065,53 @@ class ProactiveVirtualDailyPlugin(Star):
         yield event.plain_result(
             f"{action}当前{kind}会话，主动消息将在符合日程与发送规则时触发。"
         )
+
+    @filter.command("回复延迟")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def reply_delay_command(self, event: AstrMessageEvent, action: str):
+        action = str(action).strip()
+        if action == "结算":
+            batch = await self.reply_delay_coordinator.settle_now(
+                event.unified_msg_origin
+            )
+            if batch is None:
+                yield event.plain_result("当前会话没有等待结算的回复批次。")
+                return
+            logger.info(
+                "[虚拟人生] 管理员立即结算回复延迟批次 会话=%s 消息数=%s",
+                event.unified_msg_origin,
+                len(batch.messages),
+            )
+            yield event.plain_result(
+                f"已立即结算当前会话的回复批次，共 {len(batch.messages)} 条消息。"
+            )
+            return
+        if action not in {"开启", "关闭"}:
+            yield event.plain_result("用法：/回复延迟 开启|关闭|结算")
+            return
+
+        enabled = action == "开启"
+        settings = self.config.get("reply_delay_settings", {}) or {}
+        changed = bool(settings.get("enable")) != enabled
+        settings["enable"] = enabled
+        self.config["reply_delay_settings"] = settings
+        self.reply_delay_policy.settings = settings
+        if changed:
+            self.config.save_config()
+
+        settled_count = 0
+        if not enabled:
+            batches = await self.reply_delay_coordinator.settle_all_now()
+            settled_count = len(batches)
+        logger.info(
+            "[虚拟人生] 管理员%s回复延迟 配置变更=%s 结算批次=%s",
+            action,
+            changed,
+            settled_count,
+        )
+        state = "已开启" if enabled else "已关闭"
+        suffix = f"，并立即结算 {settled_count} 个等待批次" if settled_count else ""
+        yield event.plain_result(f"回复延迟{state}{suffix}。")
 
     @filter.command_group("虚拟日程")
     def virtual_daily_group(self):

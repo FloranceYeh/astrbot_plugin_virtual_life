@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from datetime import datetime, timedelta
@@ -207,6 +208,44 @@ class ReplyDelayCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         new_messages = await coordinator.settle(new_batch, new_batch.deadline)
         self.assertEqual([item.prompt for item in old_messages], ["旧批次"])
         self.assertEqual([item.prompt for item in new_messages], ["新批次"])
+
+    async def test_manual_settlement_wakes_waiting_batch(self):
+        coordinator = ReplyDelayCoordinator()
+        started = datetime(2026, 7, 28, 12, 0)
+        batch, _ = await coordinator.enqueue(
+            "umo", self.message(started, "立即结算"), self.decision(3600)
+        )
+        waiting = asyncio.create_task(coordinator.settle(batch, started))
+        await asyncio.sleep(0)
+
+        settled = await coordinator.settle_now("umo")
+        messages = await asyncio.wait_for(waiting, timeout=0.1)
+
+        self.assertIs(settled, batch)
+        self.assertEqual([item.prompt for item in messages], ["立即结算"])
+        self.assertIsNone(await coordinator.settle_now("umo"))
+
+    async def test_settle_all_wakes_every_session(self):
+        coordinator = ReplyDelayCoordinator()
+        started = datetime(2026, 7, 28, 12, 0)
+        batches = []
+        waiters = []
+        for umo in ("private", "group"):
+            batch, _ = await coordinator.enqueue(
+                umo, self.message(started, umo), self.decision(3600)
+            )
+            batches.append(batch)
+            waiters.append(asyncio.create_task(coordinator.settle(batch, started)))
+        await asyncio.sleep(0)
+
+        settled = await coordinator.settle_all_now()
+        results = await asyncio.wait_for(asyncio.gather(*waiters), timeout=0.1)
+
+        self.assertEqual(set(map(id, settled)), set(map(id, batches)))
+        self.assertEqual(
+            [[item.prompt for item in result] for result in results],
+            [["private"], ["group"]],
+        )
 
     def test_active_window_expires_and_is_not_persisted(self):
         coordinator = ReplyDelayCoordinator()

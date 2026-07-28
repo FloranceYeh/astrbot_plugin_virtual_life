@@ -36,6 +36,18 @@ class CommandGroupContractTests(unittest.TestCase):
         self.assertIn("self.config.save_config()", self.source)
         self.assertNotIn('@filter.command("sid")', self.source)
 
+    def test_reply_delay_command_controls_and_settles_batches(self):
+        self.assertIn('@filter.command("回复延迟")', self.source)
+        self.assertIn('action not in {"开启", "关闭"}', self.source)
+        self.assertIn("self.reply_delay_coordinator.settle_now", self.source)
+        self.assertIn("self.reply_delay_coordinator.settle_all_now", self.source)
+        self.assertIn('settings["enable"] = enabled', self.source)
+
+    def test_reply_delay_waits_before_framework_request_lock(self):
+        self.assertIn("@filter.on_waiting_llm_request()", self.source)
+        self.assertIn("await self._prepare_reply_delay(event)", self.source)
+        self.assertNotIn("_acquire_reply_request", self.source)
+
     def test_proactive_commands_share_group(self):
         self.assertIn('@filter.command_group("主动消息")', self.source)
         for command in ("状态", "立即", "执行时间"):

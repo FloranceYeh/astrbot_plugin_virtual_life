@@ -239,6 +239,7 @@ class QueuedMessage:
     prompt: str
     image_urls: tuple[str, ...] = ()
     audio_urls: tuple[str, ...] = ()
+    temporary_files: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -249,6 +250,7 @@ class DelayBatch:
     decision: DelayDecision
     arrival_item: TimelineItem | None = None
     messages: list[QueuedMessage] = field(default_factory=list)
+    settle_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
 
 class ReplyDelayCoordinator:
@@ -286,11 +288,29 @@ class ReplyDelayCoordinator:
     ) -> tuple[QueuedMessage, ...]:
         remaining = max(0.0, (batch.deadline - now).total_seconds())
         if remaining:
-            await asyncio.sleep(remaining)
+            try:
+                await asyncio.wait_for(batch.settle_event.wait(), timeout=remaining)
+            except TimeoutError:
+                pass
         async with self._lock:
             if self._batches.get(batch.umo) is batch:
                 self._batches.pop(batch.umo, None)
             return tuple(batch.messages)
+
+    async def settle_now(self, umo: str) -> DelayBatch | None:
+        async with self._lock:
+            batch = self._batches.pop(umo, None)
+            if batch is not None:
+                batch.settle_event.set()
+            return batch
+
+    async def settle_all_now(self) -> tuple[DelayBatch, ...]:
+        async with self._lock:
+            batches = tuple(self._batches.values())
+            self._batches.clear()
+            for batch in batches:
+                batch.settle_event.set()
+            return batches
 
     def is_active(self, umo: str, now: datetime) -> bool:
         active_until = self._active_until.get(umo)
@@ -308,6 +328,8 @@ class ReplyDelayCoordinator:
         self._active_until[umo] = now + timedelta(seconds=active_seconds)
 
     def clear(self) -> None:
+        for batch in self._batches.values():
+            batch.settle_event.set()
         self._batches.clear()
         self._active_until.clear()
 
