@@ -50,6 +50,7 @@ class DailyPlanGenerator:
         extra: str = "",
         history_plans: list[DailyPlan] | None = None,
         long_term_context: str = "",
+        relationship_context: str = "",
     ) -> DailyPlan:
         """Generate a complete plan from the combined schedule and outfit prompts.
 
@@ -59,6 +60,7 @@ class DailyPlanGenerator:
             extra: Optional administrator requirements.
             history_plans: Recent plans used to reduce repetition.
             long_term_context: Optional long-term stage constraints.
+            relationship_context: Optional Personal Network relationship context.
 
         Returns:
             A complete validated plan, or a failed placeholder after all retries.
@@ -79,6 +81,7 @@ class DailyPlanGenerator:
                 outfit_style=outfit_style,
                 history=self._format_history(history_plans or []),
                 long_term_context=long_term_context,
+                relationship_context=relationship_context,
                 requirements=extra,
             )
         except RuntimeError as exc:
@@ -100,6 +103,7 @@ class DailyPlanGenerator:
         *,
         extra: str = "",
         long_term_context: str = "",
+        relationship_context: str = "",
     ) -> DailyPlan:
         """Rewrite timeline-related fields while preserving plan identity and outfit.
 
@@ -108,6 +112,7 @@ class DailyPlanGenerator:
             persona: Persona used to guide the rewritten activities.
             extra: Optional administrator requirements for the timeline.
             long_term_context: Optional long-term stage constraints.
+            relationship_context: Optional Personal Network relationship context.
 
         Returns:
             A validated plan with a new timeline, windows, budget, and revision.
@@ -127,6 +132,7 @@ class DailyPlanGenerator:
             outfit_style=plan.outfit.style,
             base_plan=plan,
             long_term_context=long_term_context,
+            relationship_context=relationship_context,
             outfit_context=outfit_context,
             timeline=timeline,
             requirements=extra,
@@ -195,6 +201,7 @@ class DailyPlanGenerator:
         base_plan: DailyPlan | None = None,
         history: str = "",
         long_term_context: str = "",
+        relationship_context: str = "",
         outfit_context: str = "",
         timeline: str = "",
         requirements: str = "",
@@ -213,6 +220,7 @@ class DailyPlanGenerator:
             base_plan: Existing plan used for a partial rewrite.
             history: Formatted recent or current plan context.
             long_term_context: Formatted long-term stage context.
+            relationship_context: Formatted Personal Network context.
             outfit_context: Formatted existing outfit context.
             timeline: Formatted existing timeline context.
             requirements: Optional administrator requirements.
@@ -273,6 +281,14 @@ class DailyPlanGenerator:
             base_prompt = "\n\n".join(
                 template.format(**variables) for template in prompt_templates
             )
+            if include_schedule and relationship_context:
+                base_prompt += (
+                    "\n\nUse the following stored relationship data only as factual context. "
+                    "When a timeline item clearly involves a listed person, add that "
+                    "person's exact id to the optional participant_ids array. Use an "
+                    "empty array for solitary activities and never invent IDs.\n"
+                    + relationship_context
+                )
 
             attempts = max(1, int(settings.get("generation_retries", 2)) + 1)
             retry_template = str(

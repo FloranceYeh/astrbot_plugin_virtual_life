@@ -87,6 +87,7 @@ class ProactiveVirtualDailyPlugin(Star):
         self.refresh_lock = asyncio.Lock()
         self.delivery_locks: dict[str, asyncio.Lock] = {}
         self.renewal_attempts: dict[str, int] = {}
+        self._personal_network_unavailable_logged = False
 
     def _resolve_timezone(self) -> ZoneInfo:
         try:
@@ -118,6 +119,113 @@ class ProactiveVirtualDailyPlugin(Star):
     def _now(self) -> datetime:
         return now_in(self.timezone)
 
+    def _personal_network_plugin(self):
+        settings = self.config.get("personal_network_integration", {}) or {}
+        if not settings.get("enable", False):
+            return None
+        getter = getattr(self.context, "get_registered_star", None)
+        metadata = (
+            getter("astrbot_plugin_personal_network") if callable(getter) else None
+        )
+        plugin = (
+            metadata.star_cls
+            if metadata and metadata.activated and metadata.star_cls
+            else None
+        )
+        required_methods = {
+            "get_context_for_plugin",
+            "record_life_event_from_plugin",
+        }
+        if plugin is None or any(
+            not hasattr(plugin, method) for method in required_methods
+        ):
+            if not self._personal_network_unavailable_logged:
+                logger.warning(
+                    "[Virtual Life] Personal Network integration is enabled but a compatible plugin is unavailable."
+                )
+                self._personal_network_unavailable_logged = True
+            return None
+        self._personal_network_unavailable_logged = False
+        return plugin
+
+    async def _personal_network_context(self, persona_id: str) -> str:
+        plugin = self._personal_network_plugin()
+        if plugin is None:
+            return ""
+        settings = self.config.get("personal_network_integration", {}) or {}
+        try:
+            max_chars = max(
+                500,
+                min(12000, int(settings.get("max_context_chars", 4000))),
+            )
+        except (TypeError, ValueError):
+            max_chars = 4000
+        try:
+            return await plugin.get_context_for_plugin(persona_id, max_chars=max_chars)
+        except Exception:
+            logger.exception(
+                "[Virtual Life] Failed to read Personal Network context: persona=%s",
+                persona_id,
+            )
+            return ""
+
+    async def _record_completed_personal_network_events(
+        self, persona_id: str, now: datetime
+    ) -> None:
+        settings = self.config.get("personal_network_integration", {}) or {}
+        if not settings.get("record_completed_events", True):
+            return
+        plugin = self._personal_network_plugin()
+        if plugin is None:
+            return
+        for plan in self.storage.plans.values():
+            if plan.persona_id != persona_id or plan.status != "ok":
+                continue
+            plan_date = date.fromisoformat(plan.date)
+            for item in plan.timeline:
+                if not item.participant_ids:
+                    continue
+                if item.end == "24:00":
+                    ended_at = datetime.combine(
+                        plan_date + timedelta(days=1), time.min, self.timezone
+                    )
+                else:
+                    ended_at = datetime.combine(
+                        plan_date,
+                        time.fromisoformat(item.end),
+                        self.timezone,
+                    )
+                if ended_at > now:
+                    continue
+                summary = item.activity
+                if item.location:
+                    summary += f"（地点：{item.location}）"
+                try:
+                    await plugin.record_life_event_from_plugin(
+                        persona_id,
+                        participant_ids=list(item.participant_ids),
+                        event_type="virtual_schedule",
+                        summary=summary,
+                        occurred_at=ended_at.isoformat(),
+                        importance=50,
+                        emotional_tone=plan.mood,
+                        source="astrbot_plugin_virtual_life",
+                        source_key=f"{plan.date}:{item.id}",
+                    )
+                except ValueError as exc:
+                    logger.warning(
+                        "[Virtual Life] Skipped Personal Network event: persona=%s item=%s error=%s",
+                        persona_id,
+                        item.id,
+                        exc,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[Virtual Life] Failed to record Personal Network event: persona=%s item=%s",
+                        persona_id,
+                        item.id,
+                    )
+
     async def _daily_refresh(self) -> None:
         await self._refresh_all(force=True)
 
@@ -132,6 +240,7 @@ class ProactiveVirtualDailyPlugin(Star):
                 grouped.setdefault(persona.id, (persona, []))[1].append(umo)
 
             for persona, sessions in grouped.values():
+                await self._record_completed_personal_network_events(persona.id, now)
                 plan = await self._ensure_plan(persona, now.date(), force=force)
                 for umo in sessions:
                     await self._schedule_session(umo, persona, plan)
@@ -182,6 +291,7 @@ class ProactiveVirtualDailyPlugin(Star):
         schedule_requirements = self.storage.active_schedule_requirements(
             persona.id, target
         )
+        relationship_context = await self._personal_network_context(persona.id)
         requirement_sections = []
         if extra.strip():
             requirement_sections.append("本次补充要求：\n" + extra.strip())
@@ -196,6 +306,7 @@ class ProactiveVirtualDailyPlugin(Star):
             extra="\n\n".join(requirement_sections),
             history_plans=history_plans,
             long_term_context=long_term_context,
+            relationship_context=relationship_context,
         )
         plan_key = self.storage.plan_key(date_str, persona.id)
         previous_plan = self.storage.plans.get(plan_key)
@@ -552,6 +663,8 @@ class ProactiveVirtualDailyPlugin(Star):
         now = self._now()
         current_item = timeline_item_at(plan, now)
         current_state = current_item.activity if current_item else "今日状态暂未明确"
+        await self._record_completed_personal_network_events(persona.id, now)
+        relationship_context = await self._personal_network_context(persona.id)
         text = await self.message_generator.generate(
             umo=umo,
             persona=persona,
@@ -559,6 +672,7 @@ class ProactiveVirtualDailyPlugin(Star):
             current_state=current_state,
             intent=intent,
             unanswered_count=unanswered_count,
+            relationship_context=relationship_context,
         )
         await self._send_text(umo, text)
         await self.message_generator.record_conversation(
@@ -1202,11 +1316,13 @@ class ProactiveVirtualDailyPlugin(Star):
                 fallback_to_latest=True,
             )
         try:
+            relationship_context = await self._personal_network_context(persona.id)
             plan = await self.plan_generator.rewrite_schedule(
                 current,
                 persona,
                 extra=extra or "",
                 long_term_context=long_term_context,
+                relationship_context=relationship_context,
             )
         except Exception as exc:
             logger.warning(

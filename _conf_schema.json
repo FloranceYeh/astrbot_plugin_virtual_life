@@ -43,6 +43,31 @@
       }
     }
   },
+  "personal_network_integration": {
+    "description": "🔗 人际网络集成",
+    "type": "object",
+    "hint": "可选对接 astrbot_plugin_personal_network；未安装该插件时保持关闭。",
+    "items": {
+      "enable": {
+        "description": "启用人际网络集成",
+        "type": "bool",
+        "hint": "默认关闭。开启后，虚拟日程和主动消息会读取人格关系网；兼容插件不可用时自动跳过。",
+        "default": false
+      },
+      "max_context_chars": {
+        "description": "关系上下文字符上限",
+        "type": "int",
+        "hint": "注入日程和主动消息生成的关系上下文上限，建议 500-12000。",
+        "default": 4000
+      },
+      "record_completed_events": {
+        "description": "记录已完成日程经历",
+        "type": "bool",
+        "hint": "仅记录已经结束且包含明确 participant_ids 的日程项；未来计划不会提前写入。",
+        "default": true
+      }
+    }
+  },
   "prompt_settings": {
     "description": "📝 提示词与模板",
     "type": "object",

@@ -4,7 +4,11 @@ import json
 from datetime import datetime
 
 from astrbot.api import logger
-from astrbot.core.agent.message import AssistantMessageSegment, TextPart, UserMessageSegment
+from astrbot.core.agent.message import (
+    AssistantMessageSegment,
+    TextPart,
+    UserMessageSegment,
+)
 
 from .persona import PersonaContext
 
@@ -23,6 +27,7 @@ class ProactiveMessageGenerator:
         current_state: str,
         intent: str,
         unanswered_count: int,
+        relationship_context: str = "",
     ) -> str:
         settings = self.config.get("delivery_settings", {}) or {}
         template = str(settings.get("proactive_prompt", ""))
@@ -37,6 +42,8 @@ class ProactiveMessageGenerator:
             f"<persona>\n{persona.prompt}\n</persona>\n\n"
             f"<recent_conversation>\n{history}\n</recent_conversation>\n\n{task_prompt}"
         )
+        if relationship_context:
+            prompt += "\n\n" + relationship_context
         schedule_settings = self.config.get("schedule_settings", {}) or {}
         provider_id = str(schedule_settings.get("proactive_llm_provider") or "").strip()
         provider = self.context.get_provider_by_id(provider_id) if provider_id else None

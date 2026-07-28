@@ -77,6 +77,7 @@ class TimelineItem:
     location: str = ""
     state: State = "available"
     availability: Availability = "normal"
+    participant_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id or not self.activity:
@@ -90,6 +91,9 @@ class TimelineItem:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> TimelineItem:
+        participant_ids = value.get("participant_ids", [])
+        if not isinstance(participant_ids, list):
+            participant_ids = []
         return cls(
             id=str(value.get("id", "")).strip(),
             start=str(value.get("start", "")).strip(),
@@ -98,6 +102,13 @@ class TimelineItem:
             location=str(value.get("location", "")).strip(),
             state=str(value.get("state", "available")),
             availability=str(value.get("availability", "normal")),
+            participant_ids=tuple(
+                dict.fromkeys(
+                    str(item).strip()
+                    for item in participant_ids[:20]
+                    if str(item).strip()
+                )
+            ),
         )
 
 

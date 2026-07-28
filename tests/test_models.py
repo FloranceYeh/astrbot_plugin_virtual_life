@@ -59,9 +59,13 @@ class ModelTests(unittest.TestCase):
             DailyPlan.from_dict(payload)
 
     def test_valid_structured_plan(self):
-        plan = DailyPlan.from_dict(valid_payload())
+        payload = valid_payload()
+        payload["timeline"][1]["participant_ids"] = ["person-1", "person-1"]
+        plan = DailyPlan.from_dict(payload)
         self.assertEqual(plan.private_bonus, 2)
         self.assertEqual(plan.timeline[-1].end, "24:00")
+        self.assertEqual(plan.timeline[1].participant_ids, ("person-1",))
+        self.assertEqual(plan.to_dict()["timeline"][1]["participant_ids"], ("person-1",))
         self.assertEqual(plan.outfit.items[1].category, "underwear")
         self.assertEqual(plan.outfit.style, "日常休闲风")
 
