@@ -289,7 +289,7 @@
       "notification_template": {
         "description": "等待提示模板",
         "type": "string",
-        "hint": "每个实际延迟大于 0 的批次最多发送一次。占位符：{delay_seconds}=经过公式计算、向上取整及两级上限截断后的计划等待秒数；{public_reason}=public_reasons 中当前可打扰度对应的公开原因；{availability}=blocked、low、normal 或 high。未知占位符或格式错误会使该次提示不发送。模板无法引用具体活动、地点、remaining、message_length 或公式内容。",
+        "hint": "可使用 {delay_seconds}、{public_reason}、{availability}；无法引用具体活动和地点。",
         "default": "预计 {delay_seconds} 秒后回复，原因：{public_reason}。"
       }
     }
