@@ -212,7 +212,7 @@
         "description": "启用回复延迟",
         "type": "bool",
         "hint": "仅影响普通聊天；命令、主动消息和日程生成不参与延迟。",
-        "default": true
+        "default": false
       },
       "notify_user": {
         "description": "发送等待提示",
@@ -224,7 +224,7 @@
         "description": "连续对话免延迟窗口",
         "type": "int",
         "hint": "普通 LLM 回复成功发送后的免延迟秒数；每次成功回复后刷新，0 表示关闭。",
-        "default": 120
+        "default": 300
       },
       "max_delay_seconds": {
         "description": "最长回复延迟",
