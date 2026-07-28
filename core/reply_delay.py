@@ -96,6 +96,18 @@ class SafeFormulaEvaluator:
             if high < low:
                 raise FormulaError("random upper bound must not be below lower bound")
             return float(self.random_fn(low, high))
+        if name == "probability":
+            if len(arguments) not in {2, 3}:
+                raise FormulaError("probability requires two or three arguments")
+            chance, hit_value = arguments[:2]
+            if not 0 <= chance <= 1:
+                raise FormulaError("probability must be between 0 and 1")
+            miss_value = arguments[2] if len(arguments) == 3 else 0.0
+            if chance == 0:
+                return float(miss_value)
+            if chance == 1:
+                return float(hit_value)
+            return float(hit_value if self.random_fn(0.0, 1.0) < chance else miss_value)
         if name in {"min", "max"}:
             if not arguments:
                 raise FormulaError(f"{name} requires at least one argument")

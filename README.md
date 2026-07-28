@@ -84,9 +84,9 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 - `smart_context_injection.max_chars`：注入内容总字符上限，默认 `1600`，可设置 `400-8000`
 - `smart_context_injection.long_term_milestone_days`：注入近期里程碑的未来天数，默认 `7`，可设置 `0-90`
 - `smart_context_injection` 直接读取配置中的穿搭、内衣、日程、大时间表、完整日程和完整大时间表关键词列表；列表为空时对应模块不会触发
-- `reply_delay_settings.enable`：按消息到达时段的可打扰度延迟普通聊天，默认启用；等待结束后才请求 LLM
+- `reply_delay_settings.enable`：按消息到达时段的可打扰度延迟普通聊天，默认关闭；等待结束后才请求 LLM
 - `reply_delay_settings.notify_user`：每个有延迟的消息批次发送一次公开等待提示，默认启用
-- `reply_delay_settings.active_conversation_seconds`：普通 LLM 回复成功发送后的免延迟窗口，默认 `120` 秒；设为 `0` 可关闭
+- `reply_delay_settings.active_conversation_seconds`：普通 LLM 回复成功发送后的免延迟窗口，默认 `300` 秒；设为 `0` 可关闭
 - `reply_delay_settings.max_delay_seconds`：全局最长回复延迟，默认 `1800` 秒；实际延迟不会超过当前日程时段结尾
 - `reply_delay_settings.delay_formulas`：分别配置 `blocked/low/normal/high` 的延迟秒数公式
 - `prompt_settings.schedule_generation_system_prompt` 与 `prompt_settings.outfit_generation_system_prompt` 控制结构约束；完整日程使用 `prompt_settings.complete_generation_prompt_template`，局部重写使用对应的日程或穿搭模板
@@ -158,17 +158,34 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 四档默认公式的结果单位均为秒：
 
 ```text
-high:    random(0, 3)
+high:    0
 normal:  random(5, 30)
 low:     random(60, 300)
-blocked: remaining
+blocked: probability(0.2, random(300, 1200), remaining)
 ```
 
-公式变量支持 `remaining`（当前时段剩余秒数）和 `message_length`（首条消息文本长度）；函数支持 `random`、`min`、`max`、`round`、`ceil`、`floor`，运算符支持 `+ - * /` 和括号。表达式由受限解析器计算，不执行 Python 代码；缺失或非法公式会记录错误并让该批次直接结算，不使用代码内置回退值。最终延迟固定按 `min(公式结果, remaining, max_delay_seconds)` 截断，因此时段结束时立即结算。
+公式字段：
+
+| 字段 | 内容 |
+| --- | --- |
+| `remaining` | 第一条消息到达时，距离当前日程时段结尾的完整剩余秒数 |
+| `message_length` | 第一条消息的纯文本字符数，最小为 `0` |
+
+公式函数：
+
+| 函数 | 内容 |
+| --- | --- |
+| `random(low, high)` | 在 `low` 到 `high` 之间均匀随机取值，`high` 不得小于 `low` |
+| `probability(p, hit_value[, miss_value])` | 以 `0-1` 的概率 `p` 返回 `hit_value`；未命中返回 `miss_value`，省略时返回 `0`。例如 `probability(0.3, random(30, 90), remaining)` 表示 30% 概率延迟 30-90 秒，70% 概率等待到当前时段结束；最终仍受 `remaining` 和 `max_delay_seconds` 截断 |
+| `min(a, ...)` / `max(a, ...)` | 返回参数中的最小值或最大值，至少需要一个参数 |
+| `round(value[, digits])` | 按 Python `round` 规则舍入，正好位于中间时取最近偶数；`digits` 省略时为 `0` |
+| `ceil(value)` / `floor(value)` | 向上取整或向下取整 |
+
+运算符支持 `+ - * /`、一元正负号和括号。表达式由受限解析器计算，不支持属性访问、关键字参数或执行任意代码；缺失或非法公式会记录错误并让该批次直接结算，不使用代码内置回退值。公式结果先限制为非负数并向上取整，再按 `min(公式结果, remaining, max_delay_seconds)` 截断，因此时段结束时立即结算。
 
 有实际延迟时，插件按 `notification_template` 和 `public_reasons` 发送一次不经过 LLM 的提示；公开模板只能引用 `{delay_seconds}`、`{public_reason}` 和 `{availability}`，不会自动暴露具体活动或地点。结算时会把消息到达时与当前的具体日程状态、计划及实际等待时间作为临时上下文提供给 LLM，并要求模型保持角色一致且不主动披露内部细节。
 
-普通 LLM 回复成功发送后，会开启默认 `120` 秒的连续对话窗口；窗口内的新批次延迟为 `0`，每次成功回复后重新计时，沉寂超时后恢复公式延迟。等待批次和连续对话窗口只保存在内存中，插件重启后不会恢复。
+普通 LLM 回复成功发送后，会开启默认 `300` 秒的连续对话窗口；窗口内的新批次延迟为 `0`，每次成功回复后重新计时，沉寂超时后恢复公式延迟。等待批次和连续对话窗口只保存在内存中，插件重启后不会恢复。
 
 管理员可使用 `/回复延迟 开启|关闭|结算` 控制运行状态。关闭会立即结算全部会话中已经等待的批次；结算只立即处理命令所在会话的当前批次，不会延长截止时间，也不会修改配置。
 

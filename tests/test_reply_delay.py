@@ -44,6 +44,42 @@ class SafeFormulaEvaluatorTests(unittest.TestCase):
         )
         self.assertEqual(result, 5)
 
+    def test_probability_returns_hit_or_optional_miss_value(self):
+        hit = SafeFormulaEvaluator(random_fn=lambda low, high: 0.2)
+        miss = SafeFormulaEvaluator(random_fn=lambda low, high: 0.8)
+
+        self.assertEqual(hit.evaluate("probability(0.25, 90)", {}), 90)
+        self.assertEqual(miss.evaluate("probability(0.25, 90)", {}), 0)
+        self.assertEqual(miss.evaluate("probability(0.25, 90, 15)", {}), 15)
+
+    def test_documented_probability_formula_uses_remaining_as_miss_value(self):
+        hit_draws = iter((60.0, 0.2))
+        miss_draws = iter((60.0, 0.8))
+        hit = SafeFormulaEvaluator(random_fn=lambda low, high: next(hit_draws))
+        miss = SafeFormulaEvaluator(random_fn=lambda low, high: next(miss_draws))
+        formula = "probability(0.3, random(30, 90), remaining)"
+
+        self.assertEqual(hit.evaluate(formula, {"remaining": 600}), 60)
+        self.assertEqual(miss.evaluate(formula, {"remaining": 600}), 600)
+
+    def test_probability_boundaries_do_not_draw_random_value(self):
+        def unexpected_random(low, high):
+            self.fail("probability boundary must not draw a random value")
+
+        evaluator = SafeFormulaEvaluator(random_fn=unexpected_random)
+        self.assertEqual(evaluator.evaluate("probability(0, 90, 15)", {}), 15)
+        self.assertEqual(evaluator.evaluate("probability(1, 90, 15)", {}), 90)
+
+    def test_probability_rejects_invalid_probability_and_arity(self):
+        for expression in (
+            "probability(-0.1, 90)",
+            "probability(1.1, 90)",
+            "probability(0.5)",
+            "probability(0.5, 90, 15, 0)",
+        ):
+            with self.subTest(expression=expression), self.assertRaises(FormulaError):
+                self.evaluator.evaluate(expression, {})
+
     def test_rejects_attributes_and_unknown_names(self):
         with self.assertRaises(FormulaError):
             self.evaluator.evaluate("remaining.__class__", {"remaining": 10})
@@ -147,13 +183,31 @@ class ReplyDelayPolicyTests(unittest.TestCase):
         settings = reply_delay_settings()
         policy = ReplyDelayPolicy(settings)
 
-        self.assertTrue(policy.enabled)
+        self.assertFalse(policy.enabled)
         self.assertTrue(policy.notify_user)
-        self.assertEqual(policy.active_conversation_seconds, 120)
+        self.assertEqual(policy.active_conversation_seconds, 300)
         self.assertEqual(policy.max_delay_seconds, 1800)
         self.assertEqual(
             policy.notification(policy.decide(self.item, self.now, 4))[:2], "预计"
         )
+
+    def test_schema_documents_every_reply_delay_field_and_formula_function(self):
+        schema = json.loads(Path("_conf_schema.json").read_text(encoding="utf-8"))
+        items = schema["reply_delay_settings"]["items"]
+        formula_hint = items["delay_formulas"]["hint"]
+        for content in (
+            "remaining=",
+            "message_length=",
+            "random(low, high)",
+            "probability(p, hit_value[, miss_value])",
+            "min(a, ...)",
+            "max(a, ...)",
+            "round(value[, digits])",
+            "ceil(value)",
+            "floor(value)",
+        ):
+            self.assertIn(content, formula_hint)
+        self.assertIn("probability(0.3, random(30, 90), remaining)", formula_hint)
 
 
 class ReplyDelayCoordinatorTests(unittest.IsolatedAsyncioTestCase):

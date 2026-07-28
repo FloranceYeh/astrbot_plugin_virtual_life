@@ -229,18 +229,18 @@
       "max_delay_seconds": {
         "description": "最长回复延迟",
         "type": "int",
-        "hint": "公式结果的全局上限，单位为秒；实际延迟还会被当前日程时段结尾截断。",
+        "hint": "单位为秒，必须为非负整数。公式结果先向上取整并限制为不小于 0，再按 min(公式结果, remaining, max_delay_seconds) 截断；因此实际等待不会超过此值，也不会跨过消息到达时所在日程时段的结尾。设为 0 会使所有公式的最终延迟均为 0。",
         "default": 1800
       },
       "delay_formulas": {
         "description": "各可打扰度延迟公式",
         "type": "object",
-        "hint": "结果单位为秒。变量：remaining、message_length；函数：random、min、max、round、ceil、floor；支持 + - * / 和括号。",
+        "hint": "为 timeline availability 的 blocked、low、normal、high 四档分别填写表达式，结果单位为秒。字段：remaining=消息到达时距离当前日程时段结尾的完整剩余秒数；message_length=首条消息纯文本字符数，最小为 0。函数：random(low, high)=在包含边界的数值区间内均匀随机取值，high 不得小于 low；probability(p, hit_value[, miss_value])=以 0-1 的概率 p 返回 hit_value，未命中返回 miss_value，省略 miss_value 时返回 0，p 必须位于 0-1；min(a, ...)=返回最小值，至少 1 个参数；max(a, ...)=返回最大值，至少 1 个参数；round(value[, digits])=按 Python round 规则舍入，正好位于中间时取最近偶数，digits 省略时为 0；ceil(value)=向上取整；floor(value)=向下取整。运算符支持 +、-、*、/、一元正负号和括号，不支持属性访问、关键字参数或任意代码。示例：probability(0.3, random(30, 90), remaining) 表示 30% 概率延迟 30-90 秒，70% 概率等待到当前时段结束；最终结果仍受 remaining 和 max_delay_seconds 截断。非法或空公式会记录错误并让该批次立即结算，不使用代码内置回退公式。",
         "items": {
           "blocked": {
             "description": "禁止打扰",
             "type": "string",
-            "default": "remaining"
+            "default": "probability(0.2, random(300, 1200), remaining)"
           },
           "low": {
             "description": "低可打扰",
@@ -255,7 +255,7 @@
           "high": {
             "description": "高可打扰",
             "type": "string",
-            "default": "random(0, 3)"
+            "default": "0"
           }
         }
       },
@@ -289,7 +289,7 @@
       "notification_template": {
         "description": "等待提示模板",
         "type": "string",
-        "hint": "可使用 {delay_seconds}、{public_reason}、{availability}；无法引用具体活动和地点。",
+        "hint": "每个实际延迟大于 0 的批次最多发送一次。占位符：{delay_seconds}=经过公式计算、向上取整及两级上限截断后的计划等待秒数；{public_reason}=public_reasons 中当前可打扰度对应的公开原因；{availability}=blocked、low、normal 或 high。未知占位符或格式错误会使该次提示不发送。模板无法引用具体活动、地点、remaining、message_length 或公式内容。",
         "default": "预计 {delay_seconds} 秒后回复，原因：{public_reason}。"
       }
     }
