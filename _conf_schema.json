@@ -235,7 +235,7 @@
       "delay_formulas": {
         "description": "各可打扰度延迟公式",
         "type": "object",
-        "hint": "为 timeline availability 的 blocked、low、normal、high 四档分别填写表达式，结果单位为秒。字段：remaining=消息到达时距离当前日程时段结尾的完整剩余秒数；message_length=首条消息纯文本字符数，最小为 0。函数：random(low, high)=在包含边界的数值区间内均匀随机取值，high 不得小于 low；probability(p, hit_value[, miss_value])=以 0-1 的概率 p 返回 hit_value，未命中返回 miss_value，省略 miss_value 时返回 0，p 必须位于 0-1；min(a, ...)=返回最小值，至少 1 个参数；max(a, ...)=返回最大值，至少 1 个参数；round(value[, digits])=按 Python round 规则舍入，正好位于中间时取最近偶数，digits 省略时为 0；ceil(value)=向上取整；floor(value)=向下取整。运算符支持 +、-、*、/、一元正负号和括号，不支持属性访问、关键字参数或任意代码。示例：probability(0.3, random(30, 90), remaining) 表示 30% 概率延迟 30-90 秒，70% 概率等待到当前时段结束；最终结果仍受 remaining 和 max_delay_seconds 截断。非法或空公式会记录错误并让该批次立即结算，不使用代码内置回退公式。",
+        "hint": "为 timeline availability 的 blocked、low、normal、high 四档分别填写表达式，结果单位为秒。字段：remaining=消息到达时距离当前日程时段结尾的完整剩余秒数；message_length=首条消息纯文本字符数，最小为 0。函数：random(low, high)=在包含边界的数值区间内均匀随机取值，high 不得小于 low；probability(p, hit_value[, miss_value])=以 0-1 的概率 p 返回 hit_value，未命中返回 miss_value，省略 miss_value 时返回 0，p 必须位于 0-1；min(a, ...)=返回最小值，至少 1 个参数；max(a, ...)=返回最大值，至少 1 个参数；round(value[, digits])=按 Python round 规则舍入，正好位于中间时取最近偶数，digits 省略时为 0；ceil(value)=向上取整；floor(value)=向下取整。运算符支持 +、-、*、/、一元正负号和括号，不支持属性访问、关键字参数或任意代码。示例：probability(0.3, random(30, 90), remaining) 表示 30% 概率延迟 30-90 秒，70% 概率等待到当前时段结束；最终结果仍受 remaining 和 max_delay_seconds 截断。最终延迟为 0 时直接放行，不创建延迟批次、不输出延迟日志，也不向 LLM 注入延迟上下文；非法或空公式按 0 处理，不使用代码内置回退公式。",
         "items": {
           "blocked": {
             "description": "禁止打扰",

@@ -795,13 +795,6 @@ class ProactiveVirtualDailyPlugin(Star):
             len(event.get_message_str()),
             active_conversation=active,
         )
-        if decision.formula_error:
-            logger.warning(
-                "[虚拟人生] 回复延迟公式无效，本批次不延迟 availability=%s error=%s formula=%s",
-                arrival_item.availability,
-                decision.formula_error,
-                decision.formula,
-            )
         queued = QueuedMessage(
             received_at=received_at,
             sender_id=event.get_sender_id(),
@@ -821,6 +814,8 @@ class ProactiveVirtualDailyPlugin(Star):
             decision,
             arrival_item,
         )
+        if batch is None:
+            return
         if not primary:
             self._detach_temporary_files(event, queued.temporary_files)
             event.stop_event()

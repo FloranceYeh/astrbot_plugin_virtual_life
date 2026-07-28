@@ -244,6 +244,36 @@ class ReplyDelayCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         messages = await coordinator.settle(batch, batch.deadline)
         self.assertEqual([item.prompt for item in messages], ["第一条", "第二条"])
 
+    async def test_zero_delay_does_not_create_a_batch(self):
+        coordinator = ReplyDelayCoordinator()
+        started = datetime(2026, 7, 28, 12, 0)
+
+        batch, primary = await coordinator.enqueue(
+            "umo", self.message(started, "立即回复"), self.decision(0)
+        )
+
+        self.assertTrue(primary)
+        self.assertIsNone(batch)
+        self.assertIsNone(await coordinator.settle_now("umo"))
+
+    async def test_zero_delay_message_still_joins_an_existing_batch(self):
+        coordinator = ReplyDelayCoordinator()
+        started = datetime(2026, 7, 28, 12, 0)
+        batch, _ = await coordinator.enqueue(
+            "umo", self.message(started, "第一条"), self.decision(10)
+        )
+
+        joined, primary = await coordinator.enqueue(
+            "umo",
+            self.message(started + timedelta(seconds=1), "第二条"),
+            self.decision(0),
+        )
+
+        self.assertFalse(primary)
+        self.assertIs(joined, batch)
+        messages = await coordinator.settle(batch, batch.deadline)
+        self.assertEqual([item.prompt for item in messages], ["第一条", "第二条"])
+
     async def test_message_at_deadline_starts_a_new_batch(self):
         coordinator = ReplyDelayCoordinator()
         started = datetime(2026, 7, 28, 12, 0)

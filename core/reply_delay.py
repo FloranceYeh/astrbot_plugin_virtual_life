@@ -277,12 +277,16 @@ class ReplyDelayCoordinator:
         message: QueuedMessage,
         decision: DelayDecision,
         arrival_item: TimelineItem | None = None,
-    ) -> tuple[DelayBatch, bool]:
+    ) -> tuple[DelayBatch | None, bool]:
         async with self._lock:
             current = self._batches.get(umo)
             if current is not None and message.received_at < current.deadline:
                 current.messages.append(message)
                 return current, False
+            if current is not None:
+                self._batches.pop(umo, None)
+            if decision.delay_seconds <= 0:
+                return None, True
             batch = DelayBatch(
                 umo=umo,
                 created_at=message.received_at,
