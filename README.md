@@ -6,6 +6,10 @@
 
 <p align="center">为机器人维护连续的虚拟人生：长期时间表、每日日程、穿搭、当前状态与主动消息。</p>
 
+> 喜欢本插件的朋友可以点一个 `Star⭐`，也欢迎在 Issues 里提出建议或反馈问题。也欢迎给插件提交 PR，帮助完善功能或修复问题。
+
+> 推荐可联动插件 [Personal Network](https://github.com/FloranceYeh/astrbot_plugin_personal_network)
+
 ## 功能
 
 - **人格共享生活状态**：按 `persona_id` 管理数据，同一人格在不同私聊和群聊中共享连续一致的生活进度。
