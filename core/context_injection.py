@@ -129,12 +129,15 @@ class SmartContextInjector:
         )
 
     def _schedule_section(self, plan: DailyPlan, now: datetime, current: TimelineItem) -> str:
+        previous_item = self._previous_item(plan, current)
         next_item = self._next_item(plan, now)
         lines = [
             self._base_section(plan, now, current),
             f"今日主题：{plan.theme}；心情：{plan.mood}。",
             f"当前时段：{current.start}-{current.end}。",
         ]
+        if previous_item:
+            lines.append(f"上个时段：{previous_item.start}-{previous_item.end} {previous_item.activity}。")
         if next_item:
             lines.append(f"下一项：{next_item.start}-{next_item.end} {next_item.activity}。")
         return "\n".join(lines)
@@ -143,6 +146,15 @@ class SmartContextInjector:
     def _next_item(plan: DailyPlan, now: datetime) -> TimelineItem | None:
         minute = now.hour * 60 + now.minute
         return next((item for item in plan.timeline if minute_of_day(item.start) > minute), None)
+
+    @staticmethod
+    def _previous_item(plan: DailyPlan, current: TimelineItem) -> TimelineItem | None:
+        for index, item in enumerate(plan.timeline):
+            if item == current:
+                if index == 0:
+                    return None
+                return plan.timeline[index - 1]
+        return None
 
     def _outfit_section(self, plan: DailyPlan, *, include_underwear: bool, underwear_only: bool = False) -> str:
         items = []
