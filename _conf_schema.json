@@ -333,7 +333,7 @@
         "description": "注入基础状态",
         "type": "bool",
         "hint": "始终注入当前时间、活动、地点和状态；关闭后只注入关键词命中的模块。",
-        "default": false
+        "default": true
       },
       "max_chars": {
         "description": "注入长度上限",
@@ -376,7 +376,7 @@
       "schedule_keywords": {
         "description": "日程关键词",
         "type": "list",
-        "hint": "命中后注入当前时间、活动、地点、状态、主题、心情、当前时段和下一项；为空时不触发此模块。",
+        "hint": "命中后注入当前时间、活动、地点、状态、主题、心情、当前时段、上一项和下一项；为空时不触发此模块。",
         "default": [
           "在干嘛",
           "在干什么",
