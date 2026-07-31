@@ -66,10 +66,10 @@ class SmartContextInjectionTests(unittest.TestCase):
         self.plan = plan()
         self.long_term = long_term()
 
-    def test_base_state_is_disabled_by_default(self):
+    def test_base_state_is_enabled_by_default(self):
         content = SmartContextInjector(injection_settings()).build(self.plan, self.now, self.long_term, "你好！")
 
-        self.assertEqual(content, "")
+        self.assertIn("当前活动：自习", content)
 
     def test_base_state_can_be_enabled(self):
         content = SmartContextInjector(injection_settings(base_module_enable=True)).build(
@@ -138,7 +138,9 @@ class SmartContextInjectionTests(unittest.TestCase):
             "在干嘛，上课吗？",
         )
         self.assertTrue(injection)
-        self.assertEqual(modules, ("schedule", "long_term"))
+        self.assertIn("base", modules)
+        self.assertIn("schedule", modules)
+        self.assertIn("long_term", modules)
         self.assertEqual(limit, 1600)
 
     def test_base_module_is_reported_with_matched_modules(self):

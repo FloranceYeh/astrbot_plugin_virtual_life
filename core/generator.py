@@ -521,6 +521,59 @@ class DailyPlanGenerator:
             extract_json_object(raw), persona.id, required_start=start_date
         )
 
+    async def generate_new_character(
+        self,
+        persona: PersonaContext,
+    ) -> dict:
+        """Generate a new virtual character to appear in today's schedule.
+
+        Args:
+            persona: Persona context used to shape the character's background.
+
+        Returns:
+            A dict with keys: name, bio, personality, preferences, facts, relationship_type, relationship_description.
+            relationship_type is a noun like "同学"/"朋友"/"同事", relationship_description is a short sentence.
+
+        Raises:
+            RuntimeError: If the LLM call fails or output is invalid.
+        """
+        system_prompt = (
+            "你是一个虚构人物生成器。只返回一个可被 JSON.parse 直接解析的 JSON 对象，"
+            "禁止 Markdown、代码块、解释或额外文字。\n"
+            "对象必须包含以下字段：\n"
+            "- name: 非空字符串，人物姓名\n"
+            "- bio: 字符串，人物身份、职业、家庭背景和相识经历，100字以内\n"
+            "- personality: 字符串，相对稳定的性格及行为方式，50字以内\n"
+            "- preferences: 字符串，稳定喜好、忌讳和活动倾向，50字以内\n"
+            "- facts: 字符串，生日、住址和重要人生事实等其他长期信息，50字以内\n"
+            "- relationship_type: 非空字符串，与人格的关系类型（身份名词，如 同学、朋友、同事、邻居），不超过6字\n"
+            "- relationship_description: 非空字符串，关系简述，不超过30字\n"
+            "禁止输出 null、空对象或缺少任何字段的对象。"
+        )
+        prompt = (
+            f"人格设定：\n{persona.prompt}\n\n"
+            "请根据人格设定，生成一个与人格今天有可能在日程中相遇的全新虚构人物。"
+            "人物应与人格的生活圈子相符，背景、性格和关系类型要自然合理。"
+        )
+        raw = await self._call_llm_with_system(
+            prompt,
+            f"new_character_{persona.id}",
+            system_prompt,
+        )
+        payload = extract_json_object(raw)
+        for required in ("name", "relationship_type", "relationship_description"):
+            if not isinstance(payload.get(required), str) or not payload[required].strip():
+                raise RuntimeError(f"new character missing required field: {required}")
+        return {
+            "name": str(payload["name"]).strip(),
+            "bio": str(payload.get("bio", "")).strip(),
+            "personality": str(payload.get("personality", "")).strip(),
+            "preferences": str(payload.get("preferences", "")).strip(),
+            "facts": str(payload.get("facts", "")).strip(),
+            "relationship_type": str(payload["relationship_type"]).strip(),
+            "relationship_description": str(payload["relationship_description"]).strip(),
+        }
+
     async def _call_llm_with_system(
         self, prompt: str, session_id: str, system_prompt: str
     ) -> str:

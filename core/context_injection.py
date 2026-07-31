@@ -30,6 +30,7 @@ class SmartContextInjector:
         now: datetime,
         long_term,
         user_text: str,
+        participant_context: str = "",
     ) -> tuple[str, tuple[str, ...], int]:
         limit = self._max_chars()
         current = self._current_item(plan, now)
@@ -44,6 +45,10 @@ class SmartContextInjector:
         full_long_term_matched = self._matches(normalized_text, self.settings.get("full_long_term_keywords"))
         sections = []
         modules = []
+
+        if participant_context:
+            modules.append("participants")
+            sections.append(participant_context)
 
         base_module_enabled = bool(self.settings.get("base_module_enable", False))
         if base_module_enabled:

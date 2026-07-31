@@ -148,6 +148,131 @@ class ProactiveVirtualDailyPlugin(Star):
         self._personal_network_unavailable_logged = False
         return plugin
 
+    async def _generate_new_character(
+        self, persona: PersonaContext
+    ) -> str:
+        """Possibly generate a new virtual character and write it to Personal Network.
+
+        Returns a non-empty hint string to append to schedule requirements when a
+        character is successfully created, or an empty string otherwise.
+        """
+        settings = self.config.get("personal_network_integration", {}) or {}
+        try:
+            probability = max(0.0, min(1.0, float(settings.get("new_character_probability", 0.0))))
+        except (TypeError, ValueError):
+            probability = 0.0
+        if probability <= 0.0:
+            return ""
+        import random as _random
+        if _random.random() >= probability:
+            return ""
+        plugin = self._personal_network_plugin()
+        if plugin is None or not hasattr(plugin, "upsert_batch_for_plugin"):
+            return ""
+        try:
+            char = await self.plan_generator.generate_new_character(persona)
+        except Exception:
+            logger.exception(
+                "[Virtual Life] New character generation failed persona=%s", persona.id
+            )
+            return ""
+        ref = "new_char"
+        try:
+            result = await plugin.upsert_batch_for_plugin(
+                persona.id,
+                characters=[
+                    {
+                        "ref": ref,
+                        "name": char["name"],
+                        "bio": char["bio"],
+                        "personality": char["personality"],
+                        "preferences": char["preferences"],
+                        "facts": char["facts"],
+                    }
+                ],
+                relationships=[
+                    {
+                        "source": "persona",
+                        "target": ref,
+                        "type": char["relationship_type"],
+                        "strength": 30,
+                        "status": "active",
+                        "description": char["relationship_description"],
+                    }
+                ],
+                source="astrbot_plugin_virtual_life",
+            )
+            if not result.get("updated"):
+                logger.warning(
+                    "[Virtual Life] New character write rejected persona=%s: %s",
+                    persona.id,
+                    result.get("reason", "unknown"),
+                )
+                return ""
+            char_uuid = result.get("refs", {}).get(ref, "")
+            logger.info(
+                "[Virtual Life] New character written to Personal Network persona=%s name=%s uuid=%s",
+                persona.id,
+                char["name"],
+                char_uuid,
+            )
+        except Exception:
+            logger.exception(
+                "[Virtual Life] Failed to write new character to Personal Network persona=%s",
+                persona.id,
+            )
+            return ""
+        return (
+            f"今天日程中应安排与 {char['name']}（{char['relationship_type']}）的相遇或互动。"
+            f"关系说明：{char['relationship_description']}。"
+            f"人物简介：{char['bio']}。"
+            "请在时间线中自然地加入这次会面，并在对应 timeline 项目的 participant_ids 中填入该人物的 ID（从关系数据中获取）。"
+        )
+
+    async def _personal_network_participants_context(
+        self, persona_id: str, participant_ids: tuple[str, ...]
+    ) -> str:
+        """Return a brief context string for the given participant UUIDs.
+
+        Fetches the full network snapshot and filters by the provided IDs,
+        returning a formatted string suitable for injection into the LLM prompt.
+        Returns an empty string on any failure or if the feature is disabled.
+        """
+        if not participant_ids:
+            return ""
+        settings = self.config.get("personal_network_integration", {}) or {}
+        if not settings.get("inject_current_participants", True):
+            return ""
+        plugin = self._personal_network_plugin()
+        if plugin is None or not hasattr(plugin, "get_network_for_plugin"):
+            return ""
+        try:
+            data = await plugin.get_network_for_plugin(persona_id)
+        except Exception:
+            logger.exception(
+                "[Virtual Life] Failed to fetch network for participant injection persona=%s",
+                persona_id,
+            )
+            return ""
+        id_set = set(participant_ids)
+        characters = [
+            c for c in (data.get("characters") or []) if c.get("id") in id_set
+        ]
+        if not characters:
+            return ""
+        lines = ["当前时段参与人物："]
+        for c in characters:
+            name = c.get("name", "（未知）")
+            bio = c.get("bio", "")
+            personality = c.get("personality", "")
+            parts = [name]
+            if bio:
+                parts.append(bio)
+            if personality:
+                parts.append(f"性格：{personality}")
+            lines.append("- " + "；".join(parts))
+        return "\n".join(lines)
+
     async def _personal_network_context(self, persona_id: str) -> str:
         plugin = self._personal_network_plugin()
         if plugin is None:
@@ -292,6 +417,7 @@ class ProactiveVirtualDailyPlugin(Star):
             persona.id, target
         )
         relationship_context = await self._personal_network_context(persona.id)
+        new_character_hint = await self._generate_new_character(persona)
         requirement_sections = []
         if extra.strip():
             requirement_sections.append("本次补充要求：\n" + extra.strip())
@@ -300,6 +426,8 @@ class ProactiveVirtualDailyPlugin(Star):
                 "预设日程要求：\n"
                 + "\n".join(f"- {item.requirement}" for item in schedule_requirements)
             )
+        if new_character_hint:
+            requirement_sections.append("新人物出现要求：\n" + new_character_hint)
         plan = await self.plan_generator.generate(
             target,
             persona,
@@ -1060,16 +1188,32 @@ class ProactiveVirtualDailyPlugin(Star):
         if not self.smart_context_injector.enabled:
             return
         try:
-            _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+            persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
         except RuntimeError:
             return
         if plan.status != "ok":
             return
+        now = self._now()
+        current_item = next(
+            (
+                item
+                for item in plan.timeline
+                if (item.start <= now.strftime("%H:%M") < item.end or item.end == "24:00")
+                and item.participant_ids
+            ),
+            None,
+        )
+        participant_context = ""
+        if current_item and current_item.participant_ids:
+            participant_context = await self._personal_network_participants_context(
+                persona.id, current_item.participant_ids
+            )
         injection, modules, limit = self.smart_context_injector.build_details(
             plan,
-            self._now(),
+            now,
             self.long_term,
             event.get_message_str(),
+            participant_context=participant_context,
         )
         if injection:
             req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())

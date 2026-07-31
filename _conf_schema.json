@@ -65,6 +65,18 @@
         "type": "bool",
         "hint": "仅记录已经结束且包含明确 participant_ids 的日程项；未来计划不会提前写入。",
         "default": true
+      },
+      "new_character_probability": {
+        "description": "新人物生成概率",
+        "type": "float",
+        "hint": "每次生成今日日程时，以此概率触发一次新虚拟人物生成并写入关系网，生成的人物会出现在当日日程中。范围 0-1，设为 0 关闭。",
+        "default": 0.0
+      },
+      "inject_current_participants": {
+        "description": "注入当前时段参与人物",
+        "type": "bool",
+        "hint": "智能注入时，若当前日程时段含有 participant_ids，自动查询并注入这些人物的关系网信息。",
+        "default": true
       }
     }
   },
