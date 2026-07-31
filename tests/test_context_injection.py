@@ -98,7 +98,7 @@ class SmartContextInjectionTests(unittest.TestCase):
     def test_schedule_and_long_term_modules_are_combined(self):
         content = SmartContextInjector(injection_settings()).build(self.plan, self.now, self.long_term, "考试前我几点有空？")
         self.assertIn("上个时段：00:00-08:00 睡觉", content)
-        self.assertIn("下一项：12:00-24:00 午后安排", content)
+        self.assertIn("下个时段：12:00-24:00 午后安排", content)
         self.assertIn("当前大时间表阶段：秋季学期", content)
         self.assertIn("近期里程碑：2026-07-18 提交作业", content)
 

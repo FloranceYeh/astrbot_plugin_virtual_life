@@ -144,7 +144,7 @@ class SmartContextInjector:
         if previous_item:
             lines.append(f"上个时段：{previous_item.start}-{previous_item.end} {previous_item.activity}。")
         if next_item:
-            lines.append(f"下一项：{next_item.start}-{next_item.end} {next_item.activity}。")
+            lines.append(f"下个时段：{next_item.start}-{next_item.end} {next_item.activity}。")
         return "\n".join(lines)
 
     @staticmethod
