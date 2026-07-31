@@ -8,7 +8,7 @@
 
 > 喜欢本插件的朋友可以点一个 `Star⭐`，也欢迎在 Issues 里提出建议或反馈问题。也欢迎给插件提交 PR，帮助完善功能或修复问题。
 
-> 推荐可联动插件 [Personal Network](https://github.com/FloranceYeh/astrbot_plugin_personal_network)
+> 推荐可联动插件 [Personal Network](https://cloud.astrbot.app/plugin/FloranceYeh/astrbot_plugin_personal_network)
 
 ## 功能
 
@@ -195,7 +195,7 @@ blocked: probability(0.2, random(300, 1200), remaining)
 
 ## 与 Personal Network 联动
 
-推荐配合 [astrbot_plugin_personal_network](https://github.com/FloranceYeh/astrbot_plugin_personal_network) 使用。Virtual Life 负责让人格拥有连续的日程、状态和主动行为，Personal Network 负责保存这些生活中出现的人物、长期关系和共同经历；组合后，虚拟日程不再只围绕抽象活动生成，而可以延续人格已有的人际关系。
+推荐配合 [astrbot_plugin_personal_network](https://cloud.astrbot.app/plugin/FloranceYeh/astrbot_plugin_personal_network) 使用。Virtual Life 负责让人格拥有连续的日程、状态和主动行为，Personal Network 负责保存这些生活中出现的人物、长期关系和共同经历；组合后，虚拟日程不再只围绕抽象活动生成，而可以延续人格已有的人际关系。
 
 在配置中展开“人际网络集成”并开启“启用人际网络集成”后：
 
