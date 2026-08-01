@@ -49,6 +49,7 @@ from .core.utils import (
     format_timeline,
     next_available_at,
     now_in,
+    parse_datetime,
     parse_schedule_date_range,
     prune_date_keys,
     timeline_item_at,
@@ -88,6 +89,7 @@ class ProactiveVirtualDailyPlugin(Star):
         self.runtime = SchedulerRuntime(self.timezone)
         self.refresh_lock = asyncio.Lock()
         self.delivery_locks: dict[str, asyncio.Lock] = {}
+        self._window_retry_counts: dict[tuple[str, str, str], int] = {}
         self.renewal_attempts: dict[str, int] = {}
         self._personal_network_unavailable_logged = False
 
@@ -664,6 +666,7 @@ class ProactiveVirtualDailyPlugin(Star):
         revision: str,
         window_id: str,
         scheduled_at: str,
+        retry_reason: str = "",
     ) -> None:
         persona, plan = await self._ensure_plan_for_umo(umo)
         if persona.id != persona_id or plan.revision != revision:
@@ -674,7 +677,13 @@ class ProactiveVirtualDailyPlugin(Star):
         if not window:
             return
         await self._attempt_window(
-            umo, persona, plan, window, delayed=True, attempt_key=scheduled_at
+            umo,
+            persona,
+            plan,
+            window,
+            delayed=True,
+            attempt_key=scheduled_at,
+            retry_reason=retry_reason,
         )
 
     async def _attempt_window(
@@ -686,13 +695,11 @@ class ProactiveVirtualDailyPlugin(Star):
         *,
         delayed: bool,
         attempt_key: str = "",
+        retry_reason: str = "",
     ) -> None:
         intent = window.intent
         if delayed:
-            source = next(
-                item for item in plan.timeline if item.id == window.source_item_id
-            )
-            intent = f"延迟的主动消息：原定日程「{source.activity}」已结束。{intent}"
+            intent = self._delayed_window_intent(window, plan, retry_reason)
         sent, reason = await self._attempt_unsolicited(
             umo,
             persona,
@@ -701,8 +708,88 @@ class ProactiveVirtualDailyPlugin(Star):
             "window",
             attempt_key=attempt_key or window.id,
         )
-        if not sent and reason in {"sleeping", "availability probability rejected"}:
-            self._schedule_window_retry(umo, persona, plan, window)
+        if sent:
+            self._window_retry_counts.pop((umo, plan.revision, window.id), None)
+            return
+        if not self._should_retry_window(umo, reason):
+            return
+        key = (umo, plan.revision, window.id)
+        count = self._window_retry_counts.get(key, 0)
+        delivery = self.config.get("delivery_settings", {}) or {}
+        retry_max = max(0, int(delivery.get("window_retry_max", 3)))
+        if count >= retry_max:
+            return
+        run_at = self._window_retry_run_at(umo, plan, reason)
+        if run_at is None:
+            return
+        self._schedule_window_retry(umo, persona, plan, window, run_at, reason)
+        self._window_retry_counts[key] = count + 1
+
+    def _delayed_window_intent(
+        self,
+        window: ProactiveWindow,
+        plan: DailyPlan,
+        retry_reason: str = "",
+    ) -> str:
+        source = next(
+            (item for item in plan.timeline if item.id == window.source_item_id), None
+        )
+        base = window.intent
+        if not source:
+            return base
+        reason_hint = {
+            "conversation is not idle enough": "当时你正在忙或正在聊天，没找到合适的插话时机",
+            "cooldown active": "当时你们刚刚才聊过，紧接着再开口会显得太突兀",
+            "availability probability rejected": "当时对方的状态不太适合被打扰",
+            "sleeping": "当时对方正在休息",
+        }.get(retry_reason, "当时时机不太合适")
+        return (
+            f"{base}。你原本打算在「{source.activity}」时段联系对方，但{reason_hint}，"
+            "错过了那个时机；现在自然地向对方提起，别让对方察觉这是程序自动安排的。"
+        )
+
+    def _should_retry_window(self, umo: str, reason: str) -> bool:
+        if reason in {"sleeping", "availability probability rejected"}:
+            return True
+        delivery = self.config.get("delivery_settings", {}) or {}
+        if reason == "conversation is not idle enough":
+            return bool(delivery.get("window_retry_when_not_idle", False))
+        if reason == "cooldown active":
+            return bool(delivery.get("window_retry_when_cooldown", False))
+        return False
+
+    def _window_retry_run_at(
+        self, umo: str, plan: DailyPlan, reason: str
+    ) -> datetime | None:
+        now = self._now()
+        if reason in {"sleeping", "availability probability rejected"}:
+            next_time = next_available_at(plan, now)
+            if not next_time:
+                return None
+            return next_time + timedelta(minutes=random.randint(3, 15))
+        state = self.storage.sessions.get(umo)
+        if not state:
+            return None
+        delivery = self.config.get("delivery_settings", {}) or {}
+        if reason == "conversation is not idle enough" and state.last_user_message_at:
+            idle_required = max(
+                0, int(delivery.get("minimum_idle_for_window_minutes", 20))
+            )
+            target = parse_datetime(
+                state.last_user_message_at, self.timezone
+            ) + timedelta(minutes=idle_required)
+        elif reason == "cooldown active" and state.last_proactive_at:
+            settings = self.policy.settings_for(umo)
+            cooldown = max(0, int(settings.get("cooldown_minutes", 0)))
+            target = parse_datetime(
+                state.last_proactive_at, self.timezone
+            ) + timedelta(minutes=cooldown)
+        else:
+            return None
+        run_at = max(target, now) + timedelta(minutes=random.randint(1, 5))
+        if run_at.date() > date.fromisoformat(plan.date):
+            return None
+        return run_at
 
     def _schedule_window_retry(
         self,
@@ -710,11 +797,14 @@ class ProactiveVirtualDailyPlugin(Star):
         persona: PersonaContext,
         plan: DailyPlan,
         window: ProactiveWindow,
+        run_at: datetime | None = None,
+        retry_reason: str = "",
     ) -> None:
-        next_time = next_available_at(plan, self._now())
-        if not next_time:
-            return
-        run_at = next_time + timedelta(minutes=random.randint(3, 15))
+        if run_at is None:
+            next_time = next_available_at(plan, self._now())
+            if not next_time:
+                return
+            run_at = next_time + timedelta(minutes=random.randint(3, 15))
         self.runtime.add_date_job(
             f"pvd:{self._umo_hash(umo)}:plan:window-retry:{window.id}",
             run_at,
@@ -724,6 +814,7 @@ class ProactiveVirtualDailyPlugin(Star):
             plan.revision,
             window.id,
             run_at.isoformat(),
+            retry_reason,
         )
 
     async def _run_sleep(self, umo: str, persona_id: str, revision: str) -> None:
@@ -795,6 +886,12 @@ class ProactiveVirtualDailyPlugin(Star):
         current_state = current_item.activity if current_item else "今日状态暂未明确"
         await self._record_completed_personal_network_events(persona.id, now)
         relationship_context = await self._personal_network_context(persona.id)
+        timeline_context = ""
+        delivery = self.config.get("delivery_settings", {}) or {}
+        if delivery.get("proactive_timeline_context", True):
+            timeline_context = self.smart_context_injector.build_proactive_context(
+                plan, now, self.long_term
+            )
         text = await self.message_generator.generate(
             umo=umo,
             persona=persona,
@@ -803,6 +900,7 @@ class ProactiveVirtualDailyPlugin(Star):
             intent=intent,
             unanswered_count=unanswered_count,
             relationship_context=relationship_context,
+            timeline_context=timeline_context,
         )
         await self._send_text(umo, text)
         await self.message_generator.record_conversation(

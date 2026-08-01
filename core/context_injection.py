@@ -24,6 +24,24 @@ class SmartContextInjector:
     ) -> str:
         return self.build_details(plan, now, long_term, user_text)[0]
 
+    def build_proactive_context(
+        self,
+        plan: DailyPlan,
+        now: datetime,
+        long_term,
+    ) -> str:
+        """Build a natural in-character state block for proactive messages.
+
+        Unlike build_details, it does not depend on user keyword matching and
+        always includes the current schedule section alongside long-term context.
+        """
+        current = self._current_item(plan, now)
+        if not current:
+            return ""
+        sections = [self._schedule_section(plan, now, current)]
+        sections.extend(self._long_term_sections(long_term, plan.persona_id, now.date()))
+        return self._join_with_limit(sections, self._max_chars())
+
     def build_details(
         self,
         plan: DailyPlan,

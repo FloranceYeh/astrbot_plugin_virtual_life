@@ -1,11 +1,12 @@
 import json
 import unittest
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from core.context_injection import SmartContextInjector
 from core.long_term import LongTermTimelineStore, validate_stage
 from core.models import DailyPlan
+
 from tests.fixtures import outfit_payload
 
 
@@ -156,6 +157,26 @@ class SmartContextInjectionTests(unittest.TestCase):
     def test_length_limit_truncates_content(self):
         injector = SmartContextInjector(injection_settings(max_chars=400))
         content = injector.build(self.plan, self.now, self.long_term, "穿搭")
+        self.assertLessEqual(len(content), 400)
+        self.assertTrue(content.endswith("</character_state>"))
+
+    def test_build_proactive_context_includes_schedule_and_long_term(self):
+        content = SmartContextInjector(injection_settings()).build_proactive_context(
+            self.plan, self.now, self.long_term
+        )
+
+        self.assertTrue(content.startswith("<character_state>"))
+        self.assertTrue(content.endswith("</character_state>"))
+        self.assertIn("当前活动：自习", content)
+        self.assertIn("上个时段：00:00-08:00 睡觉", content)
+        self.assertIn("下个时段：12:00-24:00 午后安排", content)
+        self.assertIn("今日主题：学习日；心情：专注", content)
+        self.assertIn("当前大时间表阶段：秋季学期", content)
+
+    def test_build_proactive_context_honors_char_limit(self):
+        content = SmartContextInjector(injection_settings(max_chars=400)).build_proactive_context(
+            self.plan, self.now, self.long_term
+        )
         self.assertLessEqual(len(content), 400)
         self.assertTrue(content.endswith("</character_state>"))
 

@@ -597,6 +597,30 @@
         "hint": "日程主动窗口在计划时间前后随机偏移的分钟数，范围 0-60。",
         "default": 15
       },
+      "window_retry_when_not_idle": {
+        "description": "会话活跃时补发窗口",
+        "type": "bool",
+        "hint": "窗口触发时会话仍未达到最短沉默时，是否在空闲后延迟补发该窗口。",
+        "default": false
+      },
+      "window_retry_when_cooldown": {
+        "description": "冷却期内补发窗口",
+        "type": "bool",
+        "hint": "窗口触发时仍在发送冷却期内，是否在冷却结束后延迟补发该窗口。",
+        "default": false
+      },
+      "window_retry_max": {
+        "description": "窗口补发次数上限",
+        "type": "int",
+        "hint": "单个日程窗口一天内最多延迟补发的次数（含睡眠/可打扰拒绝导致的补发）。",
+        "default": 3
+      },
+      "proactive_timeline_context": {
+        "description": "主动消息注入日程上下文",
+        "type": "bool",
+        "hint": "生成主动消息时注入当前时段、前后活动、主题心情与长期阶段等状态上下文。",
+        "default": true
+      },
       "segmented_reply_settings": {
         "description": "🔪 主动消息分段",
         "type": "object",

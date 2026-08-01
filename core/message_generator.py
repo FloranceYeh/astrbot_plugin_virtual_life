@@ -28,6 +28,7 @@ class ProactiveMessageGenerator:
         intent: str,
         unanswered_count: int,
         relationship_context: str = "",
+        timeline_context: str = "",
     ) -> str:
         settings = self.config.get("delivery_settings", {}) or {}
         template = str(settings.get("proactive_prompt", ""))
@@ -42,6 +43,8 @@ class ProactiveMessageGenerator:
             f"<persona>\n{persona.prompt}\n</persona>\n\n"
             f"<recent_conversation>\n{history}\n</recent_conversation>\n\n{task_prompt}"
         )
+        if timeline_context:
+            prompt += "\n\n" + timeline_context
         if relationship_context:
             prompt += "\n\n" + relationship_context
         schedule_settings = self.config.get("schedule_settings", {}) or {}
