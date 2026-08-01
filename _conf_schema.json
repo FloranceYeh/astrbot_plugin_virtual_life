@@ -621,6 +621,44 @@
         "hint": "生成主动消息时注入当前时段、前后活动、主题心情与长期阶段等状态上下文。",
         "default": true
       },
+      "proactive_history_note_template": {
+        "description": "主动消息历史标注模板",
+        "type": "text",
+        "hint": "写入对话历史时用户侧说明文字，可使用 {intent}；留空使用默认的拟人描述。",
+        "default": "（你主动发起的消息）\n背景：{intent}"
+      },
+      "unanswered_hint_method": {
+        "description": "未回应语气计算方式",
+        "type": "string",
+        "hint": "segmented 使用分段模板按未回复次数取档；placeholder 使用占位模板替换未回复次数。",
+        "options": [
+          "segmented",
+          "placeholder"
+        ],
+        "labels": [
+          "分段",
+          "未回应次数占位"
+        ],
+        "default": "segmented"
+      },
+      "unanswered_hint_template": {
+        "description": "未回应语气分段模板",
+        "type": "text",
+        "hint": "按未回复次数分段，每行格式“阈值: 文本”（如 0: 正常、3: 收敛），程序取未回复次数不小于阈值的最高档。",
+        "condition": {
+          "unanswered_hint_method": "segmented"
+        },
+        "default": "0: 对方近期交流正常，语气可以自然热络一些。\n1: 对方上一次没有回应，保持自然即可，不必刻意提及。\n2: 对方有一段时间没回应了，语气稍作收敛，避免催促。\n3: 对方已连续多次没有回应，主动消息要明显收敛：表达关心但不追问，不施压，给对方留出空间。"
+      },
+      "unanswered_hint_placeholder_template": {
+        "description": "未回应语气占位模板",
+        "type": "text",
+        "hint": "单条模板，可使用 {unanswered_count} 占位替换未回复次数。",
+        "condition": {
+          "unanswered_hint_method": "placeholder"
+        },
+        "default": "对方已连续 {unanswered_count} 次未回应，请据此自然调整语气。"
+      },
       "segmented_reply_settings": {
         "description": "🔪 主动消息分段",
         "type": "object",
@@ -740,8 +778,8 @@
       "proactive_prompt": {
         "description": "主动消息提示词",
         "type": "text",
-        "hint": "可使用 {current_time}、{current_state}、{intent}、{unanswered_count}。",
-        "default": "你需要以当前人格自然地发起一条主动消息。当前时间：{current_time}。当前状态：{current_state}。触发原因：{intent}。连续未获回应：{unanswered_count} 次。结合会话历史，只输出要发送的消息正文，不要解释任务。"
+        "hint": "可使用 {current_time}、{current_state}、{intent}、{unanswered_count}、{unanswered_hint}。",
+        "default": "你需要以当前人格自然地发起一条主动消息。当前时间：{current_time}。当前状态：{current_state}。触发原因：{intent}。连续未获回应：{unanswered_count} 次。语气参考：{unanswered_hint}。结合会话历史，只输出要发送的消息正文，不要解释任务。"
       }
     }
   }
