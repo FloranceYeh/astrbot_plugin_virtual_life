@@ -95,7 +95,7 @@ def existing_plan():
     )
 
 
-def generator_config(*, retries=0, outfit_styles=None, extra_settings=None):
+def generator_config(*, retries=0, outfit_styles=None, extra_settings=None, session_settings=None):
     settings = {
         "generation_retries": retries,
     }
@@ -123,14 +123,111 @@ def generator_config(*, retries=0, outfit_styles=None, extra_settings=None):
         target = prompt_settings if key in prompt_settings else settings
         target[key] = value
     pool = {} if outfit_styles is None else {"outfit_styles": outfit_styles}
-    return {
+    config = {
         "schedule_settings": settings,
         "prompt_settings": prompt_settings,
         "creative_pool": pool,
     }
+    if session_settings is not None:
+        config.update(session_settings)
+    return config
+
+
+def response_with_windows(windows):
+    payload = json.loads(valid_json())
+    payload["proactive_windows"] = windows
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def window(id, audience, at="09:00"):
+    return {
+        "id": id,
+        "at": at,
+        "intent": "主动问候",
+        "audience": audience,
+        "source_item_id": "all",
+    }
 
 
 class GeneratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_window_count_respects_budget_caps(self):
+        too_many = response_with_windows(
+            [
+                window("w1", "both"),
+                window("w2", "both", "12:00"),
+                window("w3", "both", "18:00"),
+            ]
+        )
+        valid = response_with_windows([window("w1", "both")])
+        provider = Provider([too_many, valid])
+        config = generator_config(
+            retries=1,
+            session_settings={
+                "friend_settings": {"enable": True, "daily_budget_max": 2},
+                "group_settings": {"enable": True, "daily_budget_max": 1},
+            },
+        )
+        generator = DailyPlanGenerator(Context(provider), config)
+
+        plan = await generator.generate(
+            date(2026, 7, 14), PersonaContext("alice", "persona")
+        )
+
+        self.assertEqual(plan.status, "ok")
+        self.assertEqual(len(plan.proactive_windows), 1)
+        self.assertEqual(provider.calls, 2)
+        self.assertIn("面向好友数量 3 超过预算上限 2", provider.prompts[1])
+
+    async def test_window_budget_caps_injected_into_prompt(self):
+        provider = Provider([valid_json()])
+        config = generator_config(
+            session_settings={
+                "friend_settings": {"enable": True, "daily_budget_max": 4},
+                "group_settings": {"enable": True, "daily_budget_max": 2},
+            },
+        )
+        generator = DailyPlanGenerator(Context(provider), config)
+
+        await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
+
+        self.assertIn("主动消息预算约束", provider.prompts[0])
+        self.assertIn("不得超过 4 个", provider.prompts[0])
+        self.assertIn("不得超过 2 个", provider.prompts[0])
+        self.assertEqual(provider.calls, 1)
+
+    async def test_window_caps_not_injected_when_proactive_disabled(self):
+        provider = Provider([valid_json()])
+        generator = DailyPlanGenerator(Context(provider), generator_config())
+
+        await generator.generate(date(2026, 7, 14), PersonaContext("alice", "persona"))
+
+        self.assertNotIn("主动消息预算约束", provider.prompts[0])
+        self.assertEqual(provider.calls, 1)
+
+    async def test_window_cap_applies_only_to_enabled_session_types(self):
+        too_many = response_with_windows(
+            [window("w1", "group"), window("w2", "group", "12:00")]
+        )
+        valid = response_with_windows([window("w1", "group")])
+        provider = Provider([too_many, valid])
+        config = generator_config(
+            retries=1,
+            session_settings={
+                "friend_settings": {"enable": False},
+                "group_settings": {"enable": True, "daily_budget_max": 1},
+            },
+        )
+        generator = DailyPlanGenerator(Context(provider), config)
+
+        plan = await generator.generate(
+            date(2026, 7, 14), PersonaContext("alice", "persona")
+        )
+
+        self.assertEqual(plan.status, "ok")
+        self.assertEqual(len(plan.proactive_windows), 1)
+        self.assertIn("面向群聊数量 2 超过预算上限 1", provider.prompts[1])
+        self.assertNotIn("面向好友", provider.prompts[1])
+
     async def test_rewrite_schedule_only_replaces_schedule_fields(self):
         response = json.dumps(
             {

@@ -15,7 +15,9 @@ from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.agent.message import TextPart
 from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.provider.entities import LLMResponse, ProviderRequest
-from astrbot.core.star.filter.command import GreedyStr
+from astrbot.core.star.filter.command import CommandFilter, GreedyStr
+from astrbot.core.star.filter.command_group import CommandGroupFilter
+from astrbot.core.star.filter.regex import RegexFilter
 
 from .core.context_injection import SmartContextInjector
 from .core.generator import DailyPlanGenerator
@@ -1159,14 +1161,32 @@ class ProactiveVirtualDailyPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE, priority=999)
     async def on_friend_message(self, event: AstrMessageEvent) -> None:
-        await self._handle_incoming(event.unified_msg_origin)
+        await self._handle_incoming(event)
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=998)
     async def on_group_message(self, event: AstrMessageEvent) -> None:
-        await self._handle_incoming(event.unified_msg_origin)
+        await self._handle_incoming(event)
 
-    async def _handle_incoming(self, umo: str) -> None:
+    def _is_conversation_event(self, event: AstrMessageEvent) -> bool:
+        if event.get_extra("handlers_parsed_params", None):
+            return False
+        handlers = event.get_extra("activated_handlers", None) or []
+        for handler in handlers:
+            for event_filter in getattr(handler, "event_filters", None) or []:
+                if isinstance(
+                    event_filter, (CommandFilter, CommandGroupFilter, RegexFilter)
+                ):
+                    return False
+        return True
+
+    async def _handle_incoming(self, event: AstrMessageEvent) -> None:
+        umo = event.unified_msg_origin
         if not self.policy.is_enabled(umo):
+            return
+        if not self._is_conversation_event(event):
+            logger.debug(
+                "[虚拟人生] 命令消息不计入空闲计时 umo=%s", umo
+            )
             return
         self.policy.record_incoming(umo, self._now())
         await self.storage.save_sessions()

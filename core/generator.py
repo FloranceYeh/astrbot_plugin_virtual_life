@@ -43,6 +43,26 @@ class DailyPlanGenerator:
         except Exception:
             return "普通日期"
 
+    def _window_budget_caps(self) -> tuple[int | None, int | None]:
+        """Per-audience proactive window count ceilings derived from daily budget.
+
+        Returns the friend and group caps as optional ints. A cap is None when
+        the corresponding session type is disabled (no budget exists). When set,
+        the cap mirrors the effective daily budget ceiling: daily_budget_max
+        clamped by daily_hard_max.
+        """
+
+        def cap_for(settings_key: str) -> int | None:
+            settings = self.config.get(settings_key, {}) or {}
+            if not settings.get("enable", False):
+                return None
+            minimum = max(0, int(settings.get("daily_budget_min", 0)))
+            maximum = max(minimum, int(settings.get("daily_budget_max", minimum)))
+            hard_max = max(0, int(settings.get("daily_hard_max", maximum)))
+            return min(maximum, hard_max)
+
+        return cap_for("friend_settings"), cap_for("group_settings")
+
     async def generate(
         self,
         target: date,
@@ -238,6 +258,7 @@ class DailyPlanGenerator:
         try:
             settings = self._settings()
             prompt_settings = self._prompt_settings()
+            friend_cap, group_cap = self._window_budget_caps()
             variables = {
                 "mode": mode,
                 "date": target.isoformat(),
@@ -289,6 +310,23 @@ class DailyPlanGenerator:
                     "empty array for solitary activities and never invent IDs.\n"
                     + relationship_context
                 )
+            if include_schedule and (friend_cap is not None or group_cap is not None):
+                limits = []
+                if friend_cap is not None:
+                    limits.append(
+                        f"面向好友（audience 为 private 或 both）的 proactive_windows "
+                        f"数量不得超过 {friend_cap} 个"
+                    )
+                if group_cap is not None:
+                    limits.append(
+                        f"面向群聊（audience 为 group 或 both）的 proactive_windows "
+                        f"数量不得超过 {group_cap} 个"
+                    )
+                base_prompt += (
+                    "\n\n主动消息预算约束：proactive_windows 数量必须与每日主动消息预算一致。"
+                    + "；".join(limits)
+                    + "。audience 为 both 的窗口同时计入好友与群聊。"
+                )
 
             attempts = max(1, int(settings.get("generation_retries", 2)) + 1)
             retry_template = str(
@@ -331,6 +369,27 @@ class DailyPlanGenerator:
                         ):
                             raise ValueError(
                                 "proactive_windows must be an array of objects"
+                            )
+                        friend_count = sum(
+                            1
+                            for item in raw_windows
+                            if str(item.get("audience", "both"))
+                            in {"both", "private"}
+                        )
+                        group_count = sum(
+                            1
+                            for item in raw_windows
+                            if str(item.get("audience", "both")) in {"both", "group"}
+                        )
+                        if friend_cap is not None and friend_count > friend_cap:
+                            raise ValueError(
+                                f"proactive_windows 面向好友数量 {friend_count} "
+                                f"超过预算上限 {friend_cap}"
+                            )
+                        if group_cap is not None and group_count > group_cap:
+                            raise ValueError(
+                                f"proactive_windows 面向群聊数量 {group_count} "
+                                f"超过预算上限 {group_cap}"
                             )
                         if not isinstance(bonus, dict):
                             raise ValueError("budget_bonus must be an object")
