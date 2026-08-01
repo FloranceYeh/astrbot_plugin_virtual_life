@@ -109,6 +109,157 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 - 大时间表自动续期失败后默认每 `60` 分钟重试，最多 `6` 次
 - 图片渲染默认启用，主题为 `dark`，宽度为 `1200`；可通过 `image_settings` 调整主题、宽度和字体
 
+### 配置项名称与字段对照
+
+以下为 AstrBot 配置界面显示的名称与插件读取的字段名的对照关系，按配置分组列出。字段名即配置对象中的键路径。
+
+#### 📅 虚拟日程 `schedule_settings`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 生成时间 | `schedule_settings.generate_time` |
+| 日程模型 | `schedule_settings.schedule_llm_provider` |
+| 主动消息模型 | `schedule_settings.proactive_llm_provider` |
+| 历史参考天数 | `schedule_settings.reference_history_days` |
+| 历史保留天数 | `schedule_settings.history_days` |
+| 生成重试次数 | `schedule_settings.generation_retries` |
+
+#### 🔗 人际网络集成 `personal_network_integration`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 启用人际网络集成 | `personal_network_integration.enable` |
+| 关系上下文字符上限 | `personal_network_integration.max_context_chars` |
+| 记录已完成日程经历 | `personal_network_integration.record_completed_events` |
+| 新人物生成概率 | `personal_network_integration.new_character_probability` |
+| 注入当前时段参与人物 | `personal_network_integration.inject_current_participants` |
+
+#### 📝 提示词与模板 `prompt_settings`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 生成重试纠错模板 | `prompt_settings.generation_retry_prompt_template` |
+| 日程生成系统提示词 | `prompt_settings.schedule_generation_system_prompt` |
+| 完整生成提示模板 | `prompt_settings.complete_generation_prompt_template` |
+| 重写日程提示模板 | `prompt_settings.schedule_prompt_template` |
+| 穿搭生成系统提示词 | `prompt_settings.outfit_generation_system_prompt` |
+| 重写穿搭提示模板 | `prompt_settings.outfit_prompt_template` |
+
+#### 🎲 日程创意池 `creative_pool`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 主题池 | `creative_pool.themes` |
+| 心情池 | `creative_pool.moods` |
+| 穿搭风格池 | `creative_pool.outfit_styles` |
+
+#### 🗓️ 大时间表 `long_term_settings`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 启用大时间表 | `long_term_settings.enable` |
+| 续期重试间隔 | `long_term_settings.renewal_retry_minutes` |
+| 续期最大重试 | `long_term_settings.renewal_max_attempts` |
+
+#### 🖼️ 日程图片渲染 `image_settings`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 启用图片渲染 | `image_settings.image_render_enabled` |
+| 图片主题 | `image_settings.image_theme` |
+| 图片宽度 | `image_settings.image_width` |
+| 图片字体 | `image_settings.image_font` |
+
+#### ⏳ 普通回复延迟 `reply_delay_settings`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 启用回复延迟 | `reply_delay_settings.enable` |
+| 发送等待提示 | `reply_delay_settings.notify_user` |
+| 连续对话免延迟窗口 | `reply_delay_settings.active_conversation_seconds` |
+| 最长回复延迟 | `reply_delay_settings.max_delay_seconds` |
+| 各可打扰度延迟公式 | `reply_delay_settings.delay_formulas`（`blocked`/`low`/`normal`/`high`） |
+| 公开等待原因 | `reply_delay_settings.public_reasons` |
+| 等待提示模板 | `reply_delay_settings.notification_template` |
+
+#### 🧠 智能注入 `smart_context_injection`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 启用智能注入 | `smart_context_injection.enable` |
+| 注入基础状态 | `smart_context_injection.base_module_enable` |
+| 注入长度上限 | `smart_context_injection.max_chars` |
+| 里程碑窗口 | `smart_context_injection.long_term_milestone_days` |
+| 穿搭关键词 | `smart_context_injection.outfit_keywords` |
+| 内衣关键词 | `smart_context_injection.underwear_keywords` |
+| 日程关键词 | `smart_context_injection.schedule_keywords` |
+| 大时间表关键词 | `smart_context_injection.long_term_keywords` |
+| 完整日程关键词 | `smart_context_injection.full_schedule_keywords` |
+| 完整大时间表关键词 | `smart_context_injection.full_long_term_keywords` |
+
+#### 👤 私聊主动 `friend_settings`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 启用私聊主动 | `friend_settings.enable` |
+| 私聊白名单 | `friend_settings.session_list` |
+| 最短沉默时间 | `friend_settings.idle_min_minutes` |
+| 最长沉默时间 | `friend_settings.idle_max_minutes` |
+| 发送冷却 | `friend_settings.cooldown_minutes` |
+| 日预算下限 | `friend_settings.daily_budget_min` |
+| 日预算上限 | `friend_settings.daily_budget_max` |
+| LLM 额外预算 | `friend_settings.llm_bonus_max` |
+| 日硬上限 | `friend_settings.daily_hard_max` |
+
+#### 👥 群聊主动 `group_settings`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 启用群聊主动 | `group_settings.enable` |
+| 群聊白名单 | `group_settings.session_list` |
+| 最短沉默时间 | `group_settings.idle_min_minutes` |
+| 最长沉默时间 | `group_settings.idle_max_minutes` |
+| 发送冷却 | `group_settings.cooldown_minutes` |
+| 日预算下限 | `group_settings.daily_budget_min` |
+| 日预算上限 | `group_settings.daily_budget_max` |
+| LLM 额外预算 | `group_settings.llm_bonus_max` |
+| 日硬上限 | `group_settings.daily_hard_max` |
+
+#### 📨 发送限制 `delivery_settings`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 未回复阈值 | `delivery_settings.max_unanswered` |
+| 睡眠异常概率 | `delivery_settings.sleep_exception_probability` |
+| 窗口最短沉默 | `delivery_settings.minimum_idle_for_window_minutes` |
+| 可打扰程度触发概率 | `delivery_settings.availability_probabilities`（`blocked`/`low`/`normal`/`high`） |
+| 主动窗口随机偏移 | `delivery_settings.proactive_window_jitter_minutes` |
+| 会话活跃时补发窗口 | `delivery_settings.window_retry_when_not_idle` |
+| 冷却期内补发窗口 | `delivery_settings.window_retry_when_cooldown` |
+| 窗口补发次数上限 | `delivery_settings.window_retry_max` |
+| 主动消息注入日程上下文 | `delivery_settings.proactive_timeline_context` |
+| 主动消息历史标注模板 | `delivery_settings.proactive_history_note_template` |
+| 未回应语气计算方式 | `delivery_settings.unanswered_hint_method` |
+| 未回应语气分段模板 | `delivery_settings.unanswered_hint_template` |
+| 未回应语气占位模板 | `delivery_settings.unanswered_hint_placeholder_template` |
+| 最近聊天条数 | `delivery_settings.recent_chat_messages` |
+| 主动消息提示词 | `delivery_settings.proactive_prompt` |
+
+#### 🔪 主动消息分段 `delivery_settings.segmented_reply_settings`
+
+| 配置界面名称 | 配置字段 |
+| --- | --- |
+| 启用分段 | `delivery_settings.segmented_reply_settings.enable` |
+| 不分段字数阈值 | `delivery_settings.segmented_reply_settings.words_count_threshold` |
+| 分段模式 | `delivery_settings.segmented_reply_settings.split_mode` |
+| 分段正则表达式 | `delivery_settings.segmented_reply_settings.regex` |
+| 分段词列表 | `delivery_settings.segmented_reply_settings.split_words` |
+| 启用内容清理 | `delivery_settings.segmented_reply_settings.enable_content_cleanup` |
+| 内容清理正则表达式 | `delivery_settings.segmented_reply_settings.content_cleanup_rule` |
+| 间隔计算方法 | `delivery_settings.segmented_reply_settings.interval_method` |
+| 随机间隔（秒） | `delivery_settings.segmented_reply_settings.interval` |
+| 对数底数 | `delivery_settings.segmented_reply_settings.log_base` |
+
 ## 命令
 
 ### 虚拟人生
