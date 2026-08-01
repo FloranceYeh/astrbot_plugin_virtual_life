@@ -76,189 +76,41 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 
 管理员可在目标会话直接使用 `/虚拟人生 订阅会话`，插件会自动识别私聊或群聊、启用对应主动消息类型并将当前 UMO 写入白名单。日程查询和普通聊天状态注入不要求会话进入主动消息白名单。
 
-关键默认值：
+关键默认值（格式：字段名（配置界面名称）——说明）：
 
-- 每日生成时间：`07:00`
-- `schedule_llm_provider`：通过 AstrBot 内置 Provider 选择器指定日程生成模型，留空使用当前供应商
-- `proactive_llm_provider`：通过 AstrBot 内置 Provider 选择器单独指定主动消息模型，留空使用当前供应商
-- `generation_retries`：生成结果校验失败后的额外重试次数，默认 `2`；每次重试只参考最近一次失败输出
-- `prompt_settings`：集中管理所有生成提示词与模板，配置界面默认折叠
-- `prompt_settings.generation_retry_prompt_template`：生成纠错提示模板，可使用 `{mode}`、`{attempt}`、`{error}`、`{previous_output}`；上次输出最多注入 `12000` 个字符
-- 历史日程参考天数：`3`，设置为 `0` 可关闭
-- `smart_context_injection.enable`：普通聊天智能状态注入总开关，默认启用；不额外调用 LLM
-- `smart_context_injection.base_module_enable`：是否始终注入当前基础状态，默认启用；关闭后仅在关键词命中时注入对应模块
-- `smart_context_injection.max_chars`：注入内容总字符上限，默认 `1600`，可设置 `400-8000`
-- `smart_context_injection.long_term_milestone_days`：注入近期里程碑的未来天数，默认 `7`，可设置 `0-90`
-- `smart_context_injection` 直接读取配置中的穿搭、内衣、日程、大时间表、完整日程和完整大时间表关键词列表；列表为空时对应模块不会触发
-- `personal_network_integration.new_character_probability`：每次生成今日日程时触发新虚构人物生成并写入关系网的概率，默认 `0`，可设置 `0-1`；人物生成后作为日程要求注入当日时间线
-- `personal_network_integration.inject_current_participants`：当前日程时段含 `participant_ids` 时向智能注入查询并注入对应人物信息，默认启用
-- `reply_delay_settings.enable`：按消息到达时段的可打扰度延迟普通聊天，默认关闭；等待结束后才请求 LLM
-- `reply_delay_settings.notify_user`：每个有延迟的消息批次发送一次公开等待提示，默认启用
-- `reply_delay_settings.active_conversation_seconds`：普通 LLM 回复成功发送后的免延迟窗口，默认 `300` 秒；设为 `0` 可关闭
-- `reply_delay_settings.max_delay_seconds`：全局最长回复延迟，默认 `1800` 秒；实际延迟不会超过当前日程时段结尾
-- `reply_delay_settings.delay_formulas`：分别配置 `blocked/low/normal/high` 的延迟秒数公式
-- `prompt_settings.schedule_generation_system_prompt` 与 `prompt_settings.outfit_generation_system_prompt` 控制结构约束；完整日程使用 `prompt_settings.complete_generation_prompt_template`，局部重写使用对应的日程或穿搭模板
-- 私聊随机预算：`1-3`，LLM 最多增加 `2`，硬上限 `5`
-- 群聊随机预算：`0-1`，LLM 最多增加 `1`，硬上限 `2`
-- 连续未回复暂停阈值：`3`
-- 睡眠异常概率：`0.08`
-- 日程主动窗口随机偏移：`15` 分钟，可通过 `delivery_settings.proactive_window_jitter_minutes` 设置为 `0-60`，`0` 表示关闭
-- 普通主动消息按 `blocked/low/normal/high = 0%/25%/70%/100%` 的默认概率触发；窗口未命中时延迟到下一可打扰时段，并在意图中注明原定日程已结束
-- `delivery_settings.segmented_reply_settings` 默认使用关键词模式，原文不超过 `150` 字符时按中英文句末标点与换行拆分，超过阈值时整条发送
-- 分段模式可切换为 `regex`；内容清理拥有独立开关，发送间隔支持 `log` 和 `random`，默认按中英文字数使用 `log`
-- 大时间表自动续期失败后默认每 `60` 分钟重试，最多 `6` 次
-- 图片渲染默认启用，主题为 `dark`，宽度为 `1200`；可通过 `image_settings` 调整主题、宽度和字体
-
-### 配置项名称与字段对照
-
-以下为 AstrBot 配置界面显示的名称与插件读取的字段名的对照关系，按配置分组列出。字段名即配置对象中的键路径。
-
-#### 📅 虚拟日程 `schedule_settings`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 生成时间 | `schedule_settings.generate_time` |
-| 日程模型 | `schedule_settings.schedule_llm_provider` |
-| 主动消息模型 | `schedule_settings.proactive_llm_provider` |
-| 历史参考天数 | `schedule_settings.reference_history_days` |
-| 历史保留天数 | `schedule_settings.history_days` |
-| 生成重试次数 | `schedule_settings.generation_retries` |
-
-#### 🔗 人际网络集成 `personal_network_integration`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 启用人际网络集成 | `personal_network_integration.enable` |
-| 关系上下文字符上限 | `personal_network_integration.max_context_chars` |
-| 记录已完成日程经历 | `personal_network_integration.record_completed_events` |
-| 新人物生成概率 | `personal_network_integration.new_character_probability` |
-| 注入当前时段参与人物 | `personal_network_integration.inject_current_participants` |
-
-#### 📝 提示词与模板 `prompt_settings`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 生成重试纠错模板 | `prompt_settings.generation_retry_prompt_template` |
-| 日程生成系统提示词 | `prompt_settings.schedule_generation_system_prompt` |
-| 完整生成提示模板 | `prompt_settings.complete_generation_prompt_template` |
-| 重写日程提示模板 | `prompt_settings.schedule_prompt_template` |
-| 穿搭生成系统提示词 | `prompt_settings.outfit_generation_system_prompt` |
-| 重写穿搭提示模板 | `prompt_settings.outfit_prompt_template` |
-
-#### 🎲 日程创意池 `creative_pool`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 主题池 | `creative_pool.themes` |
-| 心情池 | `creative_pool.moods` |
-| 穿搭风格池 | `creative_pool.outfit_styles` |
-
-#### 🗓️ 大时间表 `long_term_settings`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 启用大时间表 | `long_term_settings.enable` |
-| 续期重试间隔 | `long_term_settings.renewal_retry_minutes` |
-| 续期最大重试 | `long_term_settings.renewal_max_attempts` |
-
-#### 🖼️ 日程图片渲染 `image_settings`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 启用图片渲染 | `image_settings.image_render_enabled` |
-| 图片主题 | `image_settings.image_theme` |
-| 图片宽度 | `image_settings.image_width` |
-| 图片字体 | `image_settings.image_font` |
-
-#### ⏳ 普通回复延迟 `reply_delay_settings`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 启用回复延迟 | `reply_delay_settings.enable` |
-| 发送等待提示 | `reply_delay_settings.notify_user` |
-| 连续对话免延迟窗口 | `reply_delay_settings.active_conversation_seconds` |
-| 最长回复延迟 | `reply_delay_settings.max_delay_seconds` |
-| 各可打扰度延迟公式 | `reply_delay_settings.delay_formulas`（`blocked`/`low`/`normal`/`high`） |
-| 公开等待原因 | `reply_delay_settings.public_reasons` |
-| 等待提示模板 | `reply_delay_settings.notification_template` |
-
-#### 🧠 智能注入 `smart_context_injection`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 启用智能注入 | `smart_context_injection.enable` |
-| 注入基础状态 | `smart_context_injection.base_module_enable` |
-| 注入长度上限 | `smart_context_injection.max_chars` |
-| 里程碑窗口 | `smart_context_injection.long_term_milestone_days` |
-| 穿搭关键词 | `smart_context_injection.outfit_keywords` |
-| 内衣关键词 | `smart_context_injection.underwear_keywords` |
-| 日程关键词 | `smart_context_injection.schedule_keywords` |
-| 大时间表关键词 | `smart_context_injection.long_term_keywords` |
-| 完整日程关键词 | `smart_context_injection.full_schedule_keywords` |
-| 完整大时间表关键词 | `smart_context_injection.full_long_term_keywords` |
-
-#### 👤 私聊主动 `friend_settings`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 启用私聊主动 | `friend_settings.enable` |
-| 私聊白名单 | `friend_settings.session_list` |
-| 最短沉默时间 | `friend_settings.idle_min_minutes` |
-| 最长沉默时间 | `friend_settings.idle_max_minutes` |
-| 发送冷却 | `friend_settings.cooldown_minutes` |
-| 日预算下限 | `friend_settings.daily_budget_min` |
-| 日预算上限 | `friend_settings.daily_budget_max` |
-| LLM 额外预算 | `friend_settings.llm_bonus_max` |
-| 日硬上限 | `friend_settings.daily_hard_max` |
-
-#### 👥 群聊主动 `group_settings`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 启用群聊主动 | `group_settings.enable` |
-| 群聊白名单 | `group_settings.session_list` |
-| 最短沉默时间 | `group_settings.idle_min_minutes` |
-| 最长沉默时间 | `group_settings.idle_max_minutes` |
-| 发送冷却 | `group_settings.cooldown_minutes` |
-| 日预算下限 | `group_settings.daily_budget_min` |
-| 日预算上限 | `group_settings.daily_budget_max` |
-| LLM 额外预算 | `group_settings.llm_bonus_max` |
-| 日硬上限 | `group_settings.daily_hard_max` |
-
-#### 📨 发送限制 `delivery_settings`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 未回复阈值 | `delivery_settings.max_unanswered` |
-| 睡眠异常概率 | `delivery_settings.sleep_exception_probability` |
-| 窗口最短沉默 | `delivery_settings.minimum_idle_for_window_minutes` |
-| 可打扰程度触发概率 | `delivery_settings.availability_probabilities`（`blocked`/`low`/`normal`/`high`） |
-| 主动窗口随机偏移 | `delivery_settings.proactive_window_jitter_minutes` |
-| 会话活跃时补发窗口 | `delivery_settings.window_retry_when_not_idle` |
-| 冷却期内补发窗口 | `delivery_settings.window_retry_when_cooldown` |
-| 窗口补发次数上限 | `delivery_settings.window_retry_max` |
-| 主动消息注入日程上下文 | `delivery_settings.proactive_timeline_context` |
-| 主动消息历史标注模板 | `delivery_settings.proactive_history_note_template` |
-| 未回应语气计算方式 | `delivery_settings.unanswered_hint_method` |
-| 未回应语气分段模板 | `delivery_settings.unanswered_hint_template` |
-| 未回应语气占位模板 | `delivery_settings.unanswered_hint_placeholder_template` |
-| 最近聊天条数 | `delivery_settings.recent_chat_messages` |
-| 主动消息提示词 | `delivery_settings.proactive_prompt` |
-
-#### 🔪 主动消息分段 `delivery_settings.segmented_reply_settings`
-
-| 配置界面名称 | 配置字段 |
-| --- | --- |
-| 启用分段 | `delivery_settings.segmented_reply_settings.enable` |
-| 不分段字数阈值 | `delivery_settings.segmented_reply_settings.words_count_threshold` |
-| 分段模式 | `delivery_settings.segmented_reply_settings.split_mode` |
-| 分段正则表达式 | `delivery_settings.segmented_reply_settings.regex` |
-| 分段词列表 | `delivery_settings.segmented_reply_settings.split_words` |
-| 启用内容清理 | `delivery_settings.segmented_reply_settings.enable_content_cleanup` |
-| 内容清理正则表达式 | `delivery_settings.segmented_reply_settings.content_cleanup_rule` |
-| 间隔计算方法 | `delivery_settings.segmented_reply_settings.interval_method` |
-| 随机间隔（秒） | `delivery_settings.segmented_reply_settings.interval` |
-| 对数底数 | `delivery_settings.segmented_reply_settings.log_base` |
+- `schedule_settings.generate_time`（生成时间）：每日生成时间，默认 `07:00`
+- `schedule_settings.schedule_llm_provider`（日程模型）：通过 AstrBot 内置 Provider 选择器指定日程生成模型，留空使用当前供应商
+- `schedule_settings.proactive_llm_provider`（主动消息模型）：通过 AstrBot 内置 Provider 选择器单独指定主动消息模型，留空使用当前供应商
+- `schedule_settings.reference_history_days`（历史参考天数）：生成日程时参考的近期自然日天数，默认 `3`，设置为 `0` 可关闭
+- `schedule_settings.history_days`（历史保留天数）：本地保留的日程历史天数，默认 `3`
+- `schedule_settings.generation_retries`（生成重试次数）：生成结果校验失败后的额外重试次数，默认 `2`；每次重试只参考最近一次失败输出
+- `prompt_settings`（提示词与模板）：集中管理所有生成提示词与模板，配置界面默认折叠
+- `prompt_settings.generation_retry_prompt_template`（生成重试纠错模板）：生成纠错提示模板，可使用 `{mode}`、`{attempt}`、`{error}`、`{previous_output}`；上次输出最多注入 `12000` 个字符
+- `smart_context_injection.enable`（启用智能注入）：普通聊天智能状态注入总开关，默认启用；不额外调用 LLM
+- `smart_context_injection.base_module_enable`（注入基础状态）：是否始终注入当前基础状态，默认启用；关闭后仅在关键词命中时注入对应模块
+- `smart_context_injection.max_chars`（注入长度上限）：注入内容总字符上限，默认 `1600`，可设置 `400-8000`
+- `smart_context_injection.long_term_milestone_days`（里程碑窗口）：注入近期里程碑的未来天数，默认 `7`，可设置 `0-90`
+- `smart_context_injection`（智能注入）直接读取配置中的 `outfit_keywords`（穿搭关键词）、`underwear_keywords`（内衣关键词）、`schedule_keywords`（日程关键词）、`long_term_keywords`（大时间表关键词）、`full_schedule_keywords`（完整日程关键词）和 `full_long_term_keywords`（完整大时间表关键词）；列表为空时对应模块不会触发
+- `personal_network_integration.enable`（启用人际网络集成）：默认关闭
+- `personal_network_integration.new_character_probability`（新人物生成概率）：每次生成今日日程时触发新虚构人物生成并写入关系网的概率，默认 `0`，可设置 `0-1`；人物生成后作为日程要求注入当日时间线
+- `personal_network_integration.inject_current_participants`（注入当前时段参与人物）：当前日程时段含 `participant_ids` 时向智能注入查询并注入对应人物信息，默认启用
+- `reply_delay_settings.enable`（启用回复延迟）：按消息到达时段的可打扰度延迟普通聊天，默认关闭；等待结束后才请求 LLM
+- `reply_delay_settings.notify_user`（发送等待提示）：每个有延迟的消息批次发送一次公开等待提示，默认启用
+- `reply_delay_settings.active_conversation_seconds`（连续对话免延迟窗口）：普通 LLM 回复成功发送后的免延迟窗口，默认 `300` 秒；设为 `0` 可关闭
+- `reply_delay_settings.max_delay_seconds`（最长回复延迟）：全局最长回复延迟，默认 `1800` 秒；实际延迟不会超过当前日程时段结尾
+- `reply_delay_settings.delay_formulas`（各可打扰度延迟公式）：分别配置 `blocked/low/normal/high` 的延迟秒数公式
+- `prompt_settings.schedule_generation_system_prompt`（日程生成系统提示词）与 `prompt_settings.outfit_generation_system_prompt`（穿搭生成系统提示词）控制结构约束；完整日程使用 `prompt_settings.complete_generation_prompt_template`（完整生成提示模板），局部重写使用对应的 `schedule_prompt_template`（重写日程提示模板）或 `outfit_prompt_template`（重写穿搭提示模板）
+- `friend_settings.daily_budget_min` / `daily_budget_max`（私聊日预算下限/上限）：随机预算 `1-3`，`friend_settings.llm_bonus_max`（LLM 额外预算）最多增加 `2`，`friend_settings.daily_hard_max`（日硬上限）为 `5`
+- `group_settings.daily_budget_min` / `daily_budget_max`（群聊日预算下限/上限）：随机预算 `0-1`，`group_settings.llm_bonus_max`（LLM 额外预算）最多增加 `1`，`group_settings.daily_hard_max`（日硬上限）为 `2`
+- `delivery_settings.max_unanswered`（未回复阈值）：连续未回复暂停阈值，默认 `3`
+- `delivery_settings.sleep_exception_probability`（睡眠异常概率）：默认 `0.08`
+- `delivery_settings.proactive_window_jitter_minutes`（主动窗口随机偏移）：日程主动窗口随机偏移 `15` 分钟，可设置为 `0-60`，`0` 表示关闭
+- `delivery_settings.availability_probabilities`（可打扰程度触发概率）：普通主动消息按 `blocked/low/normal/high = 0%/25%/70%/100%` 的默认概率触发；窗口未命中时延迟到下一可打扰时段，并在意图中注明原定日程已结束
+- `delivery_settings.segmented_reply_settings`（主动消息分段）：默认使用关键词模式，原文不超过 `words_count_threshold`（不分段字数阈值，默认 `150`）字符时按中英文句末标点与换行拆分，超过阈值时整条发送
+- `delivery_settings.segmented_reply_settings.split_mode`（分段模式）：可切换为 `regex`
+- `delivery_settings.segmented_reply_settings.enable_content_cleanup`（启用内容清理）拥有独立开关，`interval_method`（间隔计算方法）支持 `log` 和 `random`，默认按中英文字数使用 `log`
+- `long_term_settings.renewal_retry_minutes`（续期重试间隔）：大时间表自动续期失败后默认每 `60` 分钟重试，`long_term_settings.renewal_max_attempts`（续期最大重试）最多 `6` 次
+- `image_settings.image_render_enabled`（启用图片渲染）默认启用，`image_settings.image_theme`（图片主题）为 `dark`，`image_settings.image_width`（图片宽度）为 `1200`；可通过 `image_settings` 调整主题、宽度和字体
 
 ## 命令
 
