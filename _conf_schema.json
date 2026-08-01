@@ -630,7 +630,7 @@
       "unanswered_hint_method": {
         "description": "未回应语气计算方式",
         "type": "string",
-        "hint": "segmented 使用分段模板按未回复次数取档；placeholder 使用占位模板替换未回复次数。",
+        "hint": "用于生成主动消息提示词中的 {unanswered_hint} 占位符。segmented 使用分段模板按未回复次数取档；placeholder 使用占位模板替换未回复次数。",
         "options": [
           "segmented",
           "placeholder"
@@ -644,7 +644,7 @@
       "unanswered_hint_template": {
         "description": "未回应语气分段模板",
         "type": "text",
-        "hint": "按未回复次数分段，每行格式“阈值: 文本”（如 0: 正常、3: 收敛），程序取未回复次数不小于阈值的最高档。",
+        "hint": "按未回复次数分段，每行格式“阈值: 文本”（如 0: 正常、3: 收敛），程序取未回复次数不小于阈值的最高档，结果作为主动消息提示词 proactive_prompt 中的 {unanswered_hint}。",
         "condition": {
           "unanswered_hint_method": "segmented"
         },
@@ -653,7 +653,7 @@
       "unanswered_hint_placeholder_template": {
         "description": "未回应语气占位模板",
         "type": "text",
-        "hint": "单条模板，可使用 {unanswered_count} 占位替换未回复次数。",
+        "hint": "单条模板，可使用 {unanswered_count} 占位替换未回复次数，结果作为主动消息提示词 proactive_prompt 中的 {unanswered_hint}。",
         "condition": {
           "unanswered_hint_method": "placeholder"
         },
