@@ -4,6 +4,28 @@
 
 格式参考 Keep a Changelog，版本号以 `metadata.yaml` 的历史记录为准。
 
+## [v1.12.0] - 2026-08-01
+
+### 新增
+
+- 主动消息窗口数量与每日主动消息预算挂钩：启用主动的会话按好友/群聊预算上限约束 LLM 生成的 `proactive_windows` 数量，audience 为 `both` 的窗口同时计入两者，超限进入重试修正。
+- 新增 `delivery_settings.window_retry_when_not_idle` 与 `window_retry_when_cooldown`：窗口触发时会话仍处于活跃或发送冷却中时，可配置在空闲或冷却结束后延迟补发，避免窗口被直接丢弃。
+- 新增 `delivery_settings.window_retry_max`，限制单个窗口每天延迟补发的次数，防止低可打扰时段全天无限重排。
+- 新增 `delivery_settings.proactive_timeline_context`：生成主动消息时注入当前时段、前后活动、主题心情、穿搭与长期阶段等状态上下文（默认开启）。
+- 新增 `delivery_settings.unanswered_hint_method` 及配套 `unanswered_hint_template`（分段）与 `unanswered_hint_placeholder_template`（未回复次数占位）两套可选语气模板，主动消息随连续未回复次数渐进收敛语气；`proactive_prompt` 新增 `{unanswered_hint}` 变量。
+- 新增 `delivery_settings.proactive_history_note_template`，主动消息写入对话历史的用户侧说明改为可配置的拟人描述。
+- 新建了一个交流 QQ 群：`1051681876` ，欢迎一起讨论插件使用、功能建议和问题反馈。也欢迎各方大佬交流学习 LLM、Prompt、AstrBot 开发。
+
+### 变更
+
+- 命令类消息（含本插件与其他插件的指令、指令组、正则指令）不再计入主动空闲计时：不更新最近对话时间、不重置连续未回复数、不重排空闲主动消息。
+- 延迟窗口消息意图按失败原因生成自然情境描述（如对方正在休息、正在忙、刚聊过），不再前置「延迟的主动消息」系统式说明。
+- 主动消息写入对话历史的用户侧说明由「[系统事件：主动消息触发]」改为默认的「（你主动发起的消息）」，降低出戏感。
+
+### 修复
+
+- 修复主动窗口在会话活跃或冷却期被触发时直接丢弃、永不复发的问题。
+
 ## [v1.11.7] - 2026-07-31
 
 ### 变更
