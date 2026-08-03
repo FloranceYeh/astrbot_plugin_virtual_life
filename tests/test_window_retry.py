@@ -1,8 +1,10 @@
+import asyncio
 import os
 import sys
 import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
 from core.models import DailyPlan
@@ -42,6 +44,8 @@ def make_plugin(config, now):
     plugin.timezone = ZoneInfo("Asia/Shanghai")
     plugin.storage = SimpleNamespace(sessions={})
     plugin.policy = ProactivePolicy(config, plugin.storage, plugin.timezone)
+    plugin._conversation_activity_at = {}
+    plugin._window_retry_counts = {}
     plugin._now = lambda: now
     return plugin
 
@@ -73,6 +77,20 @@ class WindowRetryTests(unittest.TestCase):
 
         self.assertIn("时机不太合适", intent)
 
+    def test_delayed_intent_does_not_claim_ongoing_source_was_missed(self):
+        plugin = make_plugin(
+            self.base_config,
+            self.now.replace(hour=10, minute=30),
+        )
+
+        intent = plugin._delayed_window_intent(
+            self.window,
+            self.plan,
+            "conversation is not idle enough",
+        )
+
+        self.assertEqual(intent, self.window.intent)
+
     def test_sleep_and_probability_always_retry(self):
         plugin = make_plugin(self.base_config, self.now)
         self.assertTrue(plugin._should_retry_window(self.umo, "sleeping"))
@@ -82,6 +100,7 @@ class WindowRetryTests(unittest.TestCase):
         plugin = make_plugin(self.base_config, self.now)
         self.assertFalse(plugin._should_retry_window(self.umo, "conversation is not idle enough"))
         self.assertFalse(plugin._should_retry_window(self.umo, "cooldown active"))
+        self.assertFalse(plugin._should_retry_window(self.umo, "agent task active"))
 
         enabled = make_plugin(
             {
@@ -96,6 +115,7 @@ class WindowRetryTests(unittest.TestCase):
         )
         self.assertTrue(enabled._should_retry_window(self.umo, "conversation is not idle enough"))
         self.assertTrue(enabled._should_retry_window(self.umo, "cooldown active"))
+        self.assertTrue(enabled._should_retry_window(self.umo, "agent task active"))
 
     def test_retry_run_at_for_sleep_uses_next_available_slot(self):
         plugin = make_plugin(self.base_config, self.now)
@@ -114,6 +134,50 @@ class WindowRetryTests(unittest.TestCase):
 
         self.assertIsNotNone(run_at)
         self.assertGreaterEqual(run_at, self.now + timedelta(minutes=10))
+
+    def test_retry_run_at_uses_agent_completion_as_latest_activity(self):
+        plugin = make_plugin(self.base_config, self.now)
+        plugin.storage.sessions[self.umo] = SimpleNamespace(
+            last_user_message_at=(self.now - timedelta(hours=1)).isoformat()
+        )
+        plugin._conversation_activity_at[self.umo] = self.now - timedelta(minutes=5)
+
+        run_at = plugin._window_retry_run_at(
+            self.umo, self.plan, "conversation is not idle enough"
+        )
+
+        self.assertIsNotNone(run_at)
+        self.assertGreaterEqual(run_at, self.now + timedelta(minutes=15))
+
+    def test_agent_busy_retry_does_not_exhaust_retry_budget(self):
+        plugin = make_plugin(
+            {
+                **self.base_config,
+                "delivery_settings": {
+                    **self.base_config["delivery_settings"],
+                    "window_retry_when_not_idle": True,
+                },
+            },
+            self.now,
+        )
+        plugin._attempt_unsolicited = AsyncMock(
+            return_value=(False, "agent task active")
+        )
+        plugin._schedule_window_retry = Mock()
+
+        asyncio.run(
+            plugin._attempt_window(
+                self.umo,
+                SimpleNamespace(id="alice"),
+                self.plan,
+                self.window,
+                delayed=False,
+            )
+        )
+
+        key = (self.umo, self.plan.revision, self.window.id)
+        self.assertNotIn(key, plugin._window_retry_counts)
+        plugin._schedule_window_retry.assert_called_once()
 
     def test_retry_run_at_for_cooldown_clears_cooldown(self):
         plugin = make_plugin(self.base_config, self.now)
@@ -136,6 +200,16 @@ class WindowRetryTests(unittest.TestCase):
         )
         plugin.config["friend_settings"]["cooldown_minutes"] = 2000
         self.assertIsNone(plugin._window_retry_run_at(self.umo, self.plan, "cooldown active"))
+
+    def test_agent_busy_retry_does_not_cross_plan_day(self):
+        plugin = make_plugin(
+            self.base_config,
+            self.now.replace(hour=23, minute=45),
+        )
+
+        self.assertIsNone(
+            plugin._window_retry_run_at(self.umo, self.plan, "agent task active")
+        )
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from astrbot.core.provider.entities import LLMResponse, ProviderRequest
 from astrbot.core.star.filter.command import CommandFilter, GreedyStr
 from astrbot.core.star.filter.command_group import CommandGroupFilter
 from astrbot.core.star.filter.regex import RegexFilter
+from astrbot.core.utils.session_lock import session_lock_manager
 
 from .core.context_injection import SmartContextInjector
 from .core.generator import DailyPlanGenerator
@@ -89,6 +90,10 @@ class ProactiveVirtualDailyPlugin(Star):
         self.runtime = SchedulerRuntime(self.timezone)
         self.refresh_lock = asyncio.Lock()
         self.delivery_locks: dict[str, asyncio.Lock] = {}
+        self._conversation_generations: dict[str, int] = {}
+        self._conversation_activity_at: dict[str, datetime] = {}
+        self._active_agent_counts: dict[str, int] = {}
+        self._agent_release_tasks: set[asyncio.Task] = set()
         self._window_retry_counts: dict[tuple[str, str, str], int] = {}
         self.renewal_attempts: dict[str, int] = {}
         self._personal_network_unavailable_logged = False
@@ -113,6 +118,11 @@ class ProactiveVirtualDailyPlugin(Star):
     async def terminate(self) -> None:
         self.runtime.stop()
         self.reply_delay_coordinator.clear()
+        release_tasks = tuple(self._agent_release_tasks)
+        for task in release_tasks:
+            task.cancel()
+        if release_tasks:
+            await asyncio.gather(*release_tasks, return_exceptions=True)
         await self.storage.save_plans()
         await self.storage.save_sessions()
 
@@ -122,6 +132,51 @@ class ProactiveVirtualDailyPlugin(Star):
 
     def _now(self) -> datetime:
         return now_in(self.timezone)
+
+    def _mark_conversation_activity(
+        self, umo: str, moment: datetime | None = None
+    ) -> int:
+        generation = self._conversation_generations.get(umo, 0) + 1
+        self._conversation_generations[umo] = generation
+        self._conversation_activity_at[umo] = moment or self._now()
+        return generation
+
+    def _conversation_generation(self, umo: str) -> int:
+        return self._conversation_generations.get(umo, 0)
+
+    def _agent_is_active(self, umo: str) -> bool:
+        return self._active_agent_counts.get(umo, 0) > 0
+
+    def _proactive_context_is_current(self, umo: str, generation: int) -> bool:
+        return (
+            not self._agent_is_active(umo)
+            and self._conversation_generation(umo) == generation
+        )
+
+    def _window_is_idle_enough(self, umo: str, now: datetime) -> bool:
+        activity_at = self._conversation_activity_at.get(umo)
+        if activity_at is None:
+            return True
+        delivery = self.config.get("delivery_settings", {}) or {}
+        minimum = max(
+            0, int(delivery.get("minimum_idle_for_window_minutes", 20))
+        )
+        return (now - activity_at).total_seconds() >= minimum * 60
+
+    async def _release_agent_after_history_save(self, umo: str) -> None:
+        history_saved = False
+        try:
+            async with session_lock_manager.acquire_lock(umo):
+                history_saved = True
+        finally:
+            count = self._active_agent_counts.get(umo, 0)
+            if count <= 1:
+                self._active_agent_counts.pop(umo, None)
+                if history_saved:
+                    self._mark_conversation_activity(umo)
+                    self._schedule_idle(umo)
+            else:
+                self._active_agent_counts[umo] = count - 1
 
     def _personal_network_plugin(self):
         settings = self.config.get("personal_network_integration", {}) or {}
@@ -723,7 +778,8 @@ class ProactiveVirtualDailyPlugin(Star):
         if run_at is None:
             return
         self._schedule_window_retry(umo, persona, plan, window, run_at, reason)
-        self._window_retry_counts[key] = count + 1
+        if reason != "agent task active":
+            self._window_retry_counts[key] = count + 1
 
     def _delayed_window_intent(
         self,
@@ -737,8 +793,11 @@ class ProactiveVirtualDailyPlugin(Star):
         base = window.intent
         if not source:
             return base
+        if self._now() < self._end_time(plan.date, source.end):
+            return base
         reason_hint = {
             "conversation is not idle enough": "当时你正在忙或正在聊天，没找到合适的插话时机",
+            "agent task active": "当时你们正在处理一件复杂的事情，不适合突然打断",
             "cooldown active": "当时你们刚刚才聊过，紧接着再开口会显得太突兀",
             "availability probability rejected": "当时对方的状态不太适合被打扰",
             "sleeping": "当时对方正在休息",
@@ -754,6 +813,8 @@ class ProactiveVirtualDailyPlugin(Star):
         delivery = self.config.get("delivery_settings", {}) or {}
         if reason == "conversation is not idle enough":
             return bool(delivery.get("window_retry_when_not_idle", False))
+        if reason == "agent task active":
+            return bool(delivery.get("window_retry_when_not_idle", False))
         if reason == "cooldown active":
             return bool(delivery.get("window_retry_when_cooldown", False))
         return False
@@ -766,27 +827,38 @@ class ProactiveVirtualDailyPlugin(Star):
             next_time = next_available_at(plan, now)
             if not next_time:
                 return None
-            return next_time + timedelta(minutes=random.randint(3, 15))
-        state = self.storage.sessions.get(umo)
-        if not state:
-            return None
-        delivery = self.config.get("delivery_settings", {}) or {}
-        if reason == "conversation is not idle enough" and state.last_user_message_at:
+            run_at = next_time + timedelta(minutes=random.randint(3, 15))
+        elif reason == "agent task active":
+            run_at = now + timedelta(minutes=30)
+        elif reason == "conversation is not idle enough":
+            state = self.storage.sessions.get(umo)
+            delivery = self.config.get("delivery_settings", {}) or {}
             idle_required = max(
                 0, int(delivery.get("minimum_idle_for_window_minutes", 20))
             )
-            target = parse_datetime(
-                state.last_user_message_at, self.timezone
-            ) + timedelta(minutes=idle_required)
-        elif reason == "cooldown active" and state.last_proactive_at:
+            activity_times = []
+            if state and state.last_user_message_at:
+                activity_times.append(
+                    parse_datetime(state.last_user_message_at, self.timezone)
+                )
+            if activity_at := self._conversation_activity_at.get(umo):
+                activity_times.append(activity_at)
+            if not activity_times:
+                return None
+            target = max(activity_times) + timedelta(minutes=idle_required)
+            run_at = max(target, now) + timedelta(minutes=random.randint(1, 5))
+        elif reason == "cooldown active":
+            state = self.storage.sessions.get(umo)
+            if not state or not state.last_proactive_at:
+                return None
             settings = self.policy.settings_for(umo)
             cooldown = max(0, int(settings.get("cooldown_minutes", 0)))
             target = parse_datetime(
                 state.last_proactive_at, self.timezone
             ) + timedelta(minutes=cooldown)
+            run_at = max(target, now) + timedelta(minutes=random.randint(1, 5))
         else:
             return None
-        run_at = max(target, now) + timedelta(minutes=random.randint(1, 5))
         if run_at.date() > date.fromisoformat(plan.date):
             return None
         return run_at
@@ -839,7 +911,11 @@ class ProactiveVirtualDailyPlugin(Star):
                 self._schedule_idle(
                     umo, run_at=next_time + timedelta(minutes=random.randint(3, 15))
                 )
-        elif reason in {"cooldown active", "conversation is not idle enough"}:
+        elif reason in {
+            "cooldown active",
+            "conversation is not idle enough",
+            "agent task active",
+        }:
             self._schedule_idle(umo, run_at=self._now() + timedelta(minutes=30))
 
     async def _attempt_unsolicited(
@@ -854,7 +930,13 @@ class ProactiveVirtualDailyPlugin(Star):
     ) -> tuple[bool, str]:
         lock = self.delivery_locks.setdefault(umo, asyncio.Lock())
         async with lock:
+            if self._agent_is_active(umo):
+                logger.info("[虚拟人生] 跳过 %s: 会话正在处理 Agent 任务", umo)
+                return False, "agent task active"
             now = self._now()
+            if trigger == "window" and not self._window_is_idle_enough(umo, now):
+                logger.info("[虚拟人生] 跳过 %s: 会话尚未达到窗口沉默时间", umo)
+                return False, "conversation is not idle enough"
             state = self.policy.ensure_state(umo, persona.id, plan, now)
             current_item = timeline_item_at(plan, now)
             decision = self.policy.evaluate(
@@ -868,7 +950,22 @@ class ProactiveVirtualDailyPlugin(Star):
             if not decision.allowed:
                 logger.info("[虚拟人生] 跳过 %s: %s", umo, decision.reason)
                 return False, decision.reason
-            await self._deliver(umo, persona, plan, intent, state.unanswered_count)
+            generation = self._conversation_generation(umo)
+            delivered = await self._deliver(
+                umo,
+                persona,
+                plan,
+                intent,
+                state.unanswered_count,
+                generation,
+            )
+            if not delivered:
+                reason = (
+                    "agent task active"
+                    if self._agent_is_active(umo)
+                    else "conversation is not idle enough"
+                )
+                return False, reason
             self.policy.record_delivery(state, now)
             await self.storage.save_sessions()
             return True, "sent"
@@ -880,7 +977,8 @@ class ProactiveVirtualDailyPlugin(Star):
         plan: DailyPlan,
         intent: str,
         unanswered_count: int,
-    ) -> None:
+        generation: int,
+    ) -> bool:
         now = self._now()
         current_item = timeline_item_at(plan, now)
         current_state = current_item.activity if current_item else "今日状态暂未明确"
@@ -902,13 +1000,21 @@ class ProactiveVirtualDailyPlugin(Star):
             relationship_context=relationship_context,
             timeline_context=timeline_context,
         )
-        await self._send_text(umo, text)
-        await self.message_generator.record_conversation(
-            umo=umo,
-            persona_id=persona.id,
-            intent=intent,
-            assistant_text=text,
-        )
+        if not self._proactive_context_is_current(umo, generation):
+            logger.info("[虚拟人生] 丢弃 %s 的主动消息：生成期间会话已发生变化", umo)
+            return False
+        async with session_lock_manager.acquire_lock(umo):
+            if not self._proactive_context_is_current(umo, generation):
+                logger.info("[虚拟人生] 丢弃 %s 的主动消息：提交前会话已发生变化", umo)
+                return False
+            await self._send_text(umo, text)
+            await self.message_generator.record_conversation(
+                umo=umo,
+                persona_id=persona.id,
+                intent=intent,
+                assistant_text=text,
+            )
+        return True
 
     async def _send_text(self, umo: str, text: str) -> None:
         result = self.message_segmenter.split(text)
@@ -1286,9 +1392,29 @@ class ProactiveVirtualDailyPlugin(Star):
                 "[虚拟人生] 命令消息不计入空闲计时 umo=%s", umo
             )
             return
-        self.policy.record_incoming(umo, self._now())
+        now = self._now()
+        self._mark_conversation_activity(umo, now)
+        self.policy.record_incoming(umo, now)
         await self.storage.save_sessions()
         self._schedule_idle(umo)
+
+    @filter.on_agent_begin()
+    async def mark_agent_active(self, event: AstrMessageEvent, _run_context) -> None:
+        umo = event.unified_msg_origin
+        self._active_agent_counts[umo] = self._active_agent_counts.get(umo, 0) + 1
+        self._mark_conversation_activity(umo)
+
+    @filter.on_agent_done()
+    async def defer_agent_release(
+        self,
+        event: AstrMessageEvent,
+        _run_context,
+        _response: LLMResponse | None,
+    ) -> None:
+        umo = event.unified_msg_origin
+        task = asyncio.create_task(self._release_agent_after_history_save(umo))
+        self._agent_release_tasks.add(task)
+        task.add_done_callback(self._agent_release_tasks.discard)
 
     @filter.on_waiting_llm_request()
     async def queue_reply_delay(self, event: AstrMessageEvent) -> None:
