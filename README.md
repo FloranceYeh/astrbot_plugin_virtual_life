@@ -360,3 +360,7 @@ blocked: probability(0.2, random(300, 1200), remaining)
 ```
 
 以上日程估算仅覆盖首轮请求。默认最多额外重试 `2` 次；每次重试都会重新发送基础提示，并额外附带上一轮无效输出和纠错提示，因此应按实际重试次数单独累加。Provider 的实际计费 Token 以其响应中的 usage 为准；不同 tokenizer 下，中文、JSON 标点和字段名的分词结果都可能与本表不同。
+
+## 许可证
+
+本项目基于 [GNU General Public License v3.0](LICENSE) 授权。
