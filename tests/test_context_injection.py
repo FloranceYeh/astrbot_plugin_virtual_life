@@ -1,5 +1,6 @@
 import json
 import unittest
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -95,6 +96,38 @@ class SmartContextInjectionTests(unittest.TestCase):
         content = SmartContextInjector(injection_settings()).build(self.plan, self.now, self.long_term, "内衣怎么搭？")
         self.assertIn("浅色无痕内衣", content)
         self.assertIn("浅色无痕内裤", content)
+
+    def test_outfit_injects_without_schedule(self):
+        outfit_only = replace(
+            self.plan,
+            theme="",
+            mood="",
+            timeline=(),
+            proactive_windows=(),
+        )
+
+        content = SmartContextInjector(injection_settings()).build(
+            outfit_only,
+            self.now,
+            self.long_term,
+            "今天穿什么？",
+        )
+
+        self.assertIn("今日穿搭", content)
+        self.assertNotIn("当前活动", content)
+
+    def test_missing_outfit_is_not_injected(self):
+        schedule_only = replace(self.plan, outfit=None)
+
+        content = SmartContextInjector(injection_settings()).build(
+            schedule_only,
+            self.now,
+            self.long_term,
+            "今天穿什么，在干嘛？",
+        )
+
+        self.assertIn("当前活动：自习", content)
+        self.assertNotIn("今日穿搭", content)
 
     def test_schedule_and_long_term_modules_are_combined(self):
         content = SmartContextInjector(injection_settings()).build(self.plan, self.now, self.long_term, "考试前我几点有空？")

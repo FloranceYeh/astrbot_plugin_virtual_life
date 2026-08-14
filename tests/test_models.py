@@ -91,6 +91,35 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "structured object"):
             DailyPlan.from_dict(payload)
 
+    def test_schedule_can_exist_without_outfit(self):
+        payload = valid_payload()
+        payload["outfit"] = None
+
+        plan = DailyPlan.from_dict(payload)
+
+        self.assertTrue(plan.has_schedule)
+        self.assertFalse(plan.has_outfit)
+        self.assertIsNone(plan.to_dict()["outfit"])
+
+    def test_outfit_can_exist_without_schedule(self):
+        payload = valid_payload()
+        payload["theme"] = ""
+        payload["mood"] = ""
+        payload["timeline"] = []
+        payload["proactive_windows"] = []
+
+        plan = DailyPlan.from_dict(payload)
+
+        self.assertFalse(plan.has_schedule)
+        self.assertTrue(plan.has_outfit)
+
+    def test_proactive_windows_require_schedule(self):
+        payload = valid_payload()
+        payload["timeline"] = []
+
+        with self.assertRaisesRegex(ValueError, "require a schedule"):
+            DailyPlan.from_dict(payload)
+
     def test_incomplete_outfit_is_rejected(self):
         payload = valid_payload()
         payload["outfit"]["items"] = [

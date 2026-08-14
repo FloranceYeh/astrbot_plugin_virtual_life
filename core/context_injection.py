@@ -52,8 +52,6 @@ class SmartContextInjector:
     ) -> tuple[str, tuple[str, ...], int]:
         limit = self._max_chars()
         current = self._current_item(plan, now)
-        if not current:
-            return "", (), limit
         normalized_text = self._normalize(user_text)
         outfit_matched = self._matches(normalized_text, self.settings.get("outfit_keywords"))
         underwear_matched = self._matches(normalized_text, self.settings.get("underwear_keywords"))
@@ -69,12 +67,12 @@ class SmartContextInjector:
             sections.append(participant_context)
 
         base_module_enabled = bool(self.settings.get("base_module_enable", False))
-        if base_module_enabled:
+        if base_module_enabled and current:
             modules.append("base")
             if not schedule_matched:
                 sections.append(self._base_section(plan, now, current))
 
-        if full_schedule_matched:
+        if full_schedule_matched and plan.has_schedule:
             modules.append("full_schedule_query")
             sections.append(
                 "用户明确请求完整信息：必须优先调用 "
@@ -86,18 +84,18 @@ class SmartContextInjector:
                 "用户明确请求完整信息：必须优先调用 "
                 "get_long_term_timeline，不要凭当前摘要补全未查询的数据。"
             )
-        if schedule_matched:
+        if schedule_matched and current:
             modules.append("schedule")
             sections.append(self._schedule_section(plan, now, current))
         if long_term_matched:
             modules.append("long_term")
             sections.extend(self._long_term_sections(long_term, plan.persona_id, now.date()))
-        if outfit_matched:
+        if outfit_matched and plan.has_outfit:
             modules.append("outfit")
             if underwear_matched:
                 modules.append("underwear")
             sections.append(self._outfit_section(plan, include_underwear=underwear_matched))
-        elif underwear_matched:
+        elif underwear_matched and plan.has_outfit:
             modules.append("underwear")
             sections.append(self._outfit_section(plan, include_underwear=True, underwear_only=True))
 
@@ -180,6 +178,8 @@ class SmartContextInjector:
         return None
 
     def _outfit_section(self, plan: DailyPlan, *, include_underwear: bool, underwear_only: bool = False) -> str:
+        if plan.outfit is None:
+            return ""
         items = []
         for item in plan.outfit.items:
             if underwear_only and item.category not in {"underwear", "underpants"}:

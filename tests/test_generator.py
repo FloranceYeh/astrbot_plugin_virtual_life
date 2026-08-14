@@ -150,6 +150,94 @@ def window(id, audience, at="09:00"):
 
 
 class GeneratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generate_schedule_without_outfit(self):
+        provider = Provider([valid_json()])
+        generator = DailyPlanGenerator(Context(provider), generator_config())
+
+        plan = await generator.generate(
+            date(2026, 7, 14),
+            PersonaContext("alice", "persona"),
+            include_schedule=True,
+            include_outfit=False,
+        )
+
+        self.assertTrue(plan.has_schedule)
+        self.assertFalse(plan.has_outfit)
+        self.assertEqual(provider.system_prompts, ["SCHEDULE_SYSTEM"])
+        self.assertIn("SCHEDULE 生成日程", provider.prompts[0])
+
+    async def test_generate_outfit_without_schedule(self):
+        response = json.dumps({"outfit": outfit_payload()}, ensure_ascii=False)
+        provider = Provider([response])
+        generator = DailyPlanGenerator(Context(provider), generator_config())
+
+        plan = await generator.generate(
+            date(2026, 7, 14),
+            PersonaContext("alice", "persona"),
+            include_schedule=False,
+            include_outfit=True,
+        )
+
+        self.assertFalse(plan.has_schedule)
+        self.assertTrue(plan.has_outfit)
+        self.assertEqual(plan.theme, "")
+        self.assertEqual(plan.mood, "")
+        self.assertEqual(provider.system_prompts, ["OUTFIT_SYSTEM"])
+        self.assertIn("OUTFIT 生成穿搭", provider.prompts[0])
+
+    async def test_disabled_generation_does_not_call_provider(self):
+        provider = Provider([])
+        generator = DailyPlanGenerator(Context(provider), generator_config())
+
+        plan = await generator.generate(
+            date(2026, 7, 14),
+            PersonaContext("alice", "persona"),
+            include_schedule=False,
+            include_outfit=False,
+        )
+
+        self.assertFalse(plan.has_schedule)
+        self.assertFalse(plan.has_outfit)
+        self.assertEqual(provider.calls, 0)
+
+    async def test_enabled_schedule_preserves_existing_disabled_outfit(self):
+        provider = Provider([valid_json()])
+        generator = DailyPlanGenerator(Context(provider), generator_config())
+        original = existing_plan()
+
+        plan = await generator.generate(
+            date(2026, 7, 14),
+            PersonaContext("alice", "persona"),
+            include_schedule=True,
+            include_outfit=False,
+            base_plan=original,
+        )
+
+        self.assertTrue(plan.has_schedule)
+        self.assertEqual(plan.outfit, original.outfit)
+        self.assertNotEqual(plan.timeline, original.timeline)
+
+    async def test_rewrite_schedule_bootstraps_missing_theme_and_mood(self):
+        partial = DailyPlan(
+            date="2026-07-14",
+            persona_id="alice",
+            theme="",
+            mood="",
+            outfit=None,
+            timeline=(),
+        )
+        provider = Provider([valid_json()])
+        generator = DailyPlanGenerator(Context(provider), generator_config())
+
+        plan = await generator.rewrite_schedule(
+            partial, PersonaContext("alice", "persona")
+        )
+
+        self.assertTrue(plan.has_schedule)
+        self.assertTrue(plan.theme)
+        self.assertTrue(plan.mood)
+        self.assertFalse(plan.has_outfit)
+
     async def test_window_count_respects_budget_caps(self):
         too_many = response_with_windows(
             [

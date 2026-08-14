@@ -106,6 +106,8 @@ class CommandGroupContractTests(unittest.TestCase):
         outfit_template = prompts["outfit_prompt_template"]["default"]
         retry_template = prompts["generation_retry_prompt_template"]["default"]
         self.assertEqual(settings["generation_retries"]["default"], 2)
+        self.assertTrue(settings["daily_schedule_generation_enable"]["default"])
+        self.assertTrue(settings["daily_outfit_generation_enable"]["default"])
         self.assertEqual(prompt_group["type"], "object")
         self.assertTrue(all(item["collapsed"] for item in prompts.values()))
         self.assertIn("timeline 第一项", schedule_system)

@@ -71,6 +71,9 @@ class DailyPlanGenerator:
         history_plans: list[DailyPlan] | None = None,
         long_term_context: str = "",
         relationship_context: str = "",
+        include_schedule: bool = True,
+        include_outfit: bool = True,
+        base_plan: DailyPlan | None = None,
     ) -> DailyPlan:
         """Generate a complete plan from the combined schedule and outfit prompts.
 
@@ -86,23 +89,62 @@ class DailyPlanGenerator:
             A complete validated plan, or a failed placeholder after all retries.
         """
         pool = self._pool()
-        theme = self._pick(pool.get("themes"), "日常日")
-        mood = self._pick(pool.get("moods"), "平静")
-        outfit_style = self._pick(pool.get("outfit_styles"), "日常休闲风")
+        if not include_schedule and not include_outfit:
+            if base_plan is not None:
+                return base_plan
+            revision = hashlib.sha1(
+                f"{target.isoformat()}::{persona.id}::empty".encode()
+            ).hexdigest()[:12]
+            return DailyPlan(
+                date=target.isoformat(),
+                persona_id=persona.id,
+                theme="",
+                mood="",
+                outfit=None,
+                timeline=(),
+                revision=revision,
+            )
+        theme = (
+            self._pick(pool.get("themes"), "日常日")
+            if include_schedule
+            else (base_plan.theme if base_plan else "")
+        )
+        mood = (
+            self._pick(pool.get("moods"), "平静")
+            if include_schedule
+            else (base_plan.mood if base_plan else "")
+        )
+        outfit_style = (
+            self._pick(pool.get("outfit_styles"), "日常休闲风")
+            if include_outfit
+            else (base_plan.outfit.style if base_plan and base_plan.outfit else "")
+        )
+        mode = (
+            "完整生成"
+            if include_schedule and include_outfit
+            else ("生成日程" if include_schedule else "生成穿搭")
+        )
+        outfit_context, timeline = (
+            self._format_plan_context(base_plan) if base_plan else ("", "")
+        )
         try:
             return await self._generate_plan(
                 target,
                 persona,
-                mode="完整生成",
-                include_schedule=True,
-                include_outfit=True,
+                mode=mode,
+                include_schedule=include_schedule,
+                include_outfit=include_outfit,
                 theme=theme,
                 mood=mood,
                 outfit_style=outfit_style,
+                base_plan=base_plan,
                 history=self._format_history(history_plans or []),
                 long_term_context=long_term_context,
                 relationship_context=relationship_context,
+                outfit_context=outfit_context,
+                timeline=timeline,
                 requirements=extra,
+                update_theme_mood=include_schedule,
             )
         except RuntimeError as exc:
             return DailyPlan(
@@ -110,7 +152,7 @@ class DailyPlanGenerator:
                 persona_id=persona.id,
                 theme="生成失败",
                 mood="未知",
-                outfit=Outfit(summary="未知", items=(), style="未知"),
+                outfit=None,
                 timeline=(),
                 status="failed",
                 revision=hashlib.sha1(str(exc).encode("utf-8")).hexdigest()[:12],
@@ -141,21 +183,26 @@ class DailyPlanGenerator:
             RuntimeError: If generation is already running or every attempt fails.
         """
         outfit_context, timeline = self._format_plan_context(plan)
+        schedule_exists = plan.has_schedule
+        pool = self._pool()
+        theme = plan.theme if schedule_exists else self._pick(pool.get("themes"), "日常日")
+        mood = plan.mood if schedule_exists else self._pick(pool.get("moods"), "平静")
         return await self._generate_plan(
             date.fromisoformat(plan.date),
             persona,
             mode="重写日程",
             include_schedule=True,
             include_outfit=False,
-            theme=plan.theme,
-            mood=plan.mood,
-            outfit_style=plan.outfit.style,
+            theme=theme,
+            mood=mood,
+            outfit_style=plan.outfit.style if plan.outfit else "",
             base_plan=plan,
             long_term_context=long_term_context,
             relationship_context=relationship_context,
             outfit_context=outfit_context,
             timeline=timeline,
             requirements=extra,
+            update_theme_mood=not schedule_exists,
         )
 
     async def rewrite_outfit(
@@ -186,10 +233,11 @@ class DailyPlanGenerator:
         )
         styles = [value for value in styles if value]
         explicitly_requested = next((style for style in styles if style in extra), None)
-        alternatives = [style for style in styles if style != plan.outfit.style]
+        current_style = plan.outfit.style if plan.outfit else ""
+        alternatives = [style for style in styles if style != current_style]
         outfit_style = explicitly_requested or self._pick(
             alternatives,
-            plan.outfit.style or "日常休闲风",
+            current_style or "日常休闲风",
         )
         outfit_context, timeline = self._format_plan_context(plan)
         return await self._generate_plan(
@@ -225,6 +273,7 @@ class DailyPlanGenerator:
         outfit_context: str = "",
         timeline: str = "",
         requirements: str = "",
+        update_theme_mood: bool = False,
     ) -> DailyPlan:
         """Generate and validate a full plan or selected plan components.
 
@@ -265,8 +314,8 @@ class DailyPlanGenerator:
                 "weekday": "星期" + "一二三四五六日"[target.weekday()],
                 "holiday": self._holiday(target),
                 "persona": persona.prompt,
-                "theme": theme,
-                "mood": mood,
+                "theme": theme or "无",
+                "mood": mood or "无",
                 "outfit_style": outfit_style,
                 "history": history or "无",
                 "long_term_context": long_term_context or "无",
@@ -411,24 +460,44 @@ class DailyPlanGenerator:
                     revision = hashlib.sha1(
                         f"{base_plan.revision if base_plan else ''}\n{mode}\n{raw}".encode()
                     ).hexdigest()[:12]
+                    parsed_timeline = tuple(
+                        TimelineItem.from_dict(item) for item in raw_timeline
+                    )
+                    parsed_windows = tuple(
+                        ProactiveWindow.from_dict(item) for item in raw_windows
+                    )
                     if base_plan is None:
-                        payload["date"] = target.isoformat()
-                        payload["persona_id"] = persona.id
-                        payload["theme"] = theme
-                        payload["mood"] = mood
-                        payload["revision"] = revision
-                        return DailyPlan.from_dict(payload)
+                        return DailyPlan(
+                            date=target.isoformat(),
+                            persona_id=persona.id,
+                            theme=theme if include_schedule else "",
+                            mood=mood if include_schedule else "",
+                            outfit=parsed_outfit if include_outfit else None,
+                            timeline=parsed_timeline if include_schedule else (),
+                            proactive_windows=(
+                                parsed_windows if include_schedule else ()
+                            ),
+                            private_bonus=(
+                                int(bonus.get("private", 0))
+                                if include_schedule
+                                else 0
+                            ),
+                            group_bonus=(
+                                int(bonus.get("group", 0))
+                                if include_schedule
+                                else 0
+                            ),
+                            revision=revision,
+                        )
 
                     rewritten = base_plan
                     if include_schedule:
                         rewritten = replace(
                             rewritten,
-                            timeline=tuple(
-                                TimelineItem.from_dict(item) for item in raw_timeline
-                            ),
-                            proactive_windows=tuple(
-                                ProactiveWindow.from_dict(item) for item in raw_windows
-                            ),
+                            theme=theme if update_theme_mood else rewritten.theme,
+                            mood=mood if update_theme_mood else rewritten.mood,
+                            timeline=parsed_timeline,
+                            proactive_windows=parsed_windows,
                             private_bonus=int(bonus.get("private", 0)),
                             group_bonus=int(bonus.get("group", 0)),
                         )
@@ -477,12 +546,16 @@ class DailyPlanGenerator:
         Returns:
             Outfit context followed by timeline context.
         """
-        outfit_items = "；".join(
-            f"{item.category}={item.name}"
-            + (f"（{item.details}）" if item.details else "")
-            for item in plan.outfit.items
-        )
-        outfit_context = f"{plan.outfit.style}｜{plan.outfit.summary}｜{outfit_items}"
+        outfit_context = ""
+        if plan.outfit:
+            outfit_items = "；".join(
+                f"{item.category}={item.name}"
+                + (f"（{item.details}）" if item.details else "")
+                for item in plan.outfit.items
+            )
+            outfit_context = (
+                f"{plan.outfit.style}｜{plan.outfit.summary}｜{outfit_items}"
+            )
         timeline = "；".join(
             f"{item.start}-{item.end} {item.activity}"
             + (f" @ {item.location}" if item.location else "")
@@ -502,17 +575,22 @@ class DailyPlanGenerator:
             activities = "、".join(
                 dict.fromkeys(item.activity for item in plan.timeline)
             )
+            outfit_style = plan.outfit.style if plan.outfit else "无"
             blocks.append(
-                f"- {plan.date}｜主题：{plan.theme}｜心情：{plan.mood}｜"
-                f"穿搭风格：{plan.outfit.style}｜主要活动：{activities or '无'}"
+                f"- {plan.date}｜主题：{plan.theme or '无'}｜"
+                f"心情：{plan.mood or '无'}｜穿搭风格：{outfit_style}｜"
+                f"主要活动：{activities or '无'}"
             )
         latest = plans[-1]
         _, latest_activities = DailyPlanGenerator._format_plan_context(latest)
+        latest_style = latest.outfit.style if latest.outfit else "无"
+        latest_outfit = latest.outfit.summary if latest.outfit else "无"
         blocks.extend(
             [
                 "最近一天详情：",
-                f"- {latest.date}｜主题：{latest.theme}｜心情：{latest.mood}｜"
-                f"穿搭风格：{latest.outfit.style}｜穿搭：{latest.outfit.summary}｜"
+                f"- {latest.date}｜主题：{latest.theme or '无'}｜"
+                f"心情：{latest.mood or '无'}｜穿搭风格：{latest_style}｜"
+                f"穿搭：{latest_outfit}｜"
                 f"活动：{latest_activities}",
                 "新日程可以延续尚未完成的兴趣或状态，但不要照抄相同主题、穿搭和活动组合。",
             ]

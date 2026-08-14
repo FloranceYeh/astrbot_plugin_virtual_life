@@ -61,6 +61,40 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(restored.sessions["umo"].daily_budget, 2)
 
+    async def test_partial_components_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = PluginStorage(Path(directory))
+            schedule_only = DailyPlan.from_dict(
+                {
+                    "date": "2026-07-14",
+                    "persona_id": "alice",
+                    "theme": "日常",
+                    "mood": "平静",
+                    "outfit": None,
+                    "timeline": [
+                        {
+                            "id": "all",
+                            "start": "00:00",
+                            "end": "24:00",
+                            "activity": "休息",
+                            "state": "available",
+                            "availability": "normal",
+                        }
+                    ],
+                    "proactive_windows": [],
+                    "budget_bonus": {},
+                }
+            )
+            storage.plans[storage.plan_key(schedule_only.date, "alice")] = schedule_only
+            await storage.save_plans()
+
+            restored = PluginStorage(Path(directory))
+            await restored.load()
+            plan = restored.get_plan("2026-07-14", "alice")
+
+            self.assertTrue(plan.has_schedule)
+            self.assertFalse(plan.has_outfit)
+
     async def test_recent_plans_are_persona_isolated_and_ordered(self):
         with tempfile.TemporaryDirectory() as directory:
             storage = PluginStorage(Path(directory))

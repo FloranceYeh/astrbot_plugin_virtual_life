@@ -190,6 +190,9 @@ class ScheduleImageRenderer:
         )
 
     async def render_outfit(self, plan: DailyPlan, now: datetime) -> str:
+        if plan.outfit is None:
+            raise ValueError("outfit is unavailable")
+        outfit = plan.outfit
         outfit_items = [
             {
                 "category": item.category,
@@ -198,7 +201,7 @@ class ScheduleImageRenderer:
                 "name": item.name,
                 "details": item.details,
             }
-            for item in plan.outfit.items
+            for item in outfit.items
         ]
         data = self._base_data(
             "outfit",
@@ -208,8 +211,9 @@ class ScheduleImageRenderer:
                 "subtitle": plan.persona_id,
                 "theme_text": plan.theme,
                 "mood": plan.mood,
-                "outfit_style": plan.outfit.style,
-                "outfit_summary": plan.outfit.summary,
+                "has_schedule": plan.has_schedule,
+                "outfit_style": outfit.style,
+                "outfit_summary": outfit.summary,
                 "outfit_items": outfit_items,
                 "generated_at": now.strftime("%Y-%m-%d %H:%M"),
             },

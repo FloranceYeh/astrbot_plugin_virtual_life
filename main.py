@@ -90,6 +90,7 @@ class ProactiveVirtualDailyPlugin(Star):
         self.runtime = SchedulerRuntime(self.timezone)
         self.refresh_lock = asyncio.Lock()
         self.delivery_locks: dict[str, asyncio.Lock] = {}
+        self._schedule_available_umos: set[str] = set()
         self._conversation_generations: dict[str, int] = {}
         self._conversation_activity_at: dict[str, datetime] = {}
         self._active_agent_counts: dict[str, int] = {}
@@ -132,6 +133,13 @@ class ProactiveVirtualDailyPlugin(Star):
 
     def _now(self) -> datetime:
         return now_in(self.timezone)
+
+    def _daily_generation_flags(self) -> tuple[bool, bool]:
+        settings = self.config.get("schedule_settings", {}) or {}
+        return (
+            bool(settings.get("daily_schedule_generation_enable", True)),
+            bool(settings.get("daily_outfit_generation_enable", True)),
+        )
 
     def _mark_conversation_activity(
         self, umo: str, moment: datetime | None = None
@@ -439,11 +447,20 @@ class ProactiveVirtualDailyPlugin(Star):
             await self.storage.save_sessions()
 
     async def _ensure_plan_for_umo(
-        self, umo: str, *, force: bool = False, extra: str = ""
+        self,
+        umo: str,
+        *,
+        force: bool = False,
+        extra: str = "",
+        preserve_disabled: bool = False,
     ) -> tuple[PersonaContext, DailyPlan]:
         persona = await self.personas.resolve(umo)
         plan = await self._ensure_plan(
-            persona, self._now().date(), force=force, extra=extra
+            persona,
+            self._now().date(),
+            force=force,
+            extra=extra,
+            preserve_disabled=preserve_disabled,
         )
         return persona, plan
 
@@ -454,29 +471,43 @@ class ProactiveVirtualDailyPlugin(Star):
         *,
         force: bool = False,
         extra: str = "",
+        preserve_disabled: bool = False,
     ) -> DailyPlan:
         date_str = target.isoformat()
         existing = self.storage.get_plan(date_str, persona.id)
         if existing and not force:
             return existing
         settings = self.config.get("schedule_settings", {}) or {}
-        reference_days = max(0, int(settings.get("reference_history_days", 3)))
-        history_plans = self.storage.get_recent_plans(
-            persona.id, target, reference_days
-        )
+        include_schedule, include_outfit = self._daily_generation_flags()
+        history_plans = []
+        if include_schedule:
+            reference_days = max(
+                0, int(settings.get("reference_history_days", 3))
+            )
+            history_plans = self.storage.get_recent_plans(
+                persona.id, target, reference_days
+            )
         long_term_settings = self.config.get("long_term_settings", {}) or {}
         long_term_context = ""
-        if long_term_settings.get("enable", True):
+        if include_schedule and long_term_settings.get("enable", True):
             long_term_context = self.long_term.format_day_context(
                 persona.id,
                 target,
                 fallback_to_latest=True,
             )
-        schedule_requirements = self.storage.active_schedule_requirements(
-            persona.id, target
+        schedule_requirements = (
+            self.storage.active_schedule_requirements(persona.id, target)
+            if include_schedule
+            else []
         )
-        relationship_context = await self._personal_network_context(persona.id)
-        new_character_hint = await self._generate_new_character(persona)
+        relationship_context = (
+            await self._personal_network_context(persona.id)
+            if include_schedule
+            else ""
+        )
+        new_character_hint = (
+            await self._generate_new_character(persona) if include_schedule else ""
+        )
         requirement_sections = []
         if extra.strip():
             requirement_sections.append("本次补充要求：\n" + extra.strip())
@@ -494,11 +525,14 @@ class ProactiveVirtualDailyPlugin(Star):
             history_plans=history_plans,
             long_term_context=long_term_context,
             relationship_context=relationship_context,
+            include_schedule=include_schedule,
+            include_outfit=include_outfit,
+            base_plan=existing if preserve_disabled else None,
         )
         plan_key = self.storage.plan_key(date_str, persona.id)
         previous_plan = self.storage.plans.get(plan_key)
         self.storage.plans[plan_key] = plan
-        if plan.status == "ok":
+        if include_schedule and plan.has_schedule:
             self.storage.consume_schedule_requirements(
                 [item.id for item in schedule_requirements], target
             )
@@ -539,7 +573,7 @@ class ProactiveVirtualDailyPlugin(Star):
             for offset in range(range_days):
                 target = start + timedelta(days=offset)
                 existing_plan = self.storage.get_plan(target.isoformat(), persona.id)
-                if existing_plan and existing_plan.status == "ok":
+                if existing_plan and existing_plan.has_schedule:
                     raise ValueError(
                         f"{target.isoformat()} 已有有效日程，无法添加首次生成要求"
                     )
@@ -593,31 +627,35 @@ class ProactiveVirtualDailyPlugin(Star):
     ) -> None:
         prefix = f"pvd:{self._umo_hash(umo)}:plan:"
         self.runtime.remove_prefix(prefix)
+        self.runtime.remove(f"pvd:{self._umo_hash(umo)}:idle")
+        if not plan.has_schedule:
+            self._schedule_available_umos.discard(umo)
+            return
+        self._schedule_available_umos.add(umo)
         now = self._now()
         state = self.policy.ensure_state(umo, persona.id, plan, now)
-        if plan.status == "ok":
-            delivery = self.config.get("delivery_settings", {}) or {}
-            jitter_minutes = delivery.get("proactive_window_jitter_minutes", 15)
-            for window in plan.proactive_windows:
-                if not self._window_matches(umo, window):
-                    continue
-                run_at = self._at_time(plan.date, window.at) + timedelta(
-                    minutes=proactive_window_offset_minutes(
-                        plan, window, jitter_minutes
-                    ),
-                )
-                if run_at <= now:
-                    continue
-                self.runtime.add_date_job(
-                    prefix + "window:" + window.id,
-                    run_at,
-                    self._run_window,
-                    umo,
-                    persona.id,
-                    plan.revision,
-                    window.id,
-                )
-            await self._schedule_sleep_exception(umo, persona, plan, state)
+        delivery = self.config.get("delivery_settings", {}) or {}
+        jitter_minutes = delivery.get("proactive_window_jitter_minutes", 15)
+        for window in plan.proactive_windows:
+            if not self._window_matches(umo, window):
+                continue
+            run_at = self._at_time(plan.date, window.at) + timedelta(
+                minutes=proactive_window_offset_minutes(
+                    plan, window, jitter_minutes
+                ),
+            )
+            if run_at <= now:
+                continue
+            self.runtime.add_date_job(
+                prefix + "window:" + window.id,
+                run_at,
+                self._run_window,
+                umo,
+                persona.id,
+                plan.revision,
+                window.id,
+            )
+        await self._schedule_sleep_exception(umo, persona, plan, state)
         self._schedule_idle(umo)
 
     @staticmethod
@@ -691,7 +729,10 @@ class ProactiveVirtualDailyPlugin(Star):
     def _schedule_idle(self, umo: str, *, run_at: datetime | None = None) -> None:
         job_id = f"pvd:{self._umo_hash(umo)}:idle"
         self.runtime.remove(job_id)
-        if not self.policy.is_enabled(umo):
+        if (
+            not self.policy.is_enabled(umo)
+            or umo not in self._schedule_available_umos
+        ):
             return
         if run_at is None:
             settings = self.policy.settings_for(umo)
@@ -930,6 +971,8 @@ class ProactiveVirtualDailyPlugin(Star):
     ) -> tuple[bool, str]:
         lock = self.delivery_locks.setdefault(umo, asyncio.Lock())
         async with lock:
+            if not plan.has_schedule:
+                return False, "schedule unavailable"
             if self._agent_is_active(umo):
                 logger.info("[虚拟人生] 跳过 %s: 会话正在处理 Agent 任务", umo)
                 return False, "agent task active"
@@ -1139,7 +1182,12 @@ class ProactiveVirtualDailyPlugin(Star):
         return sorted(entries, key=lambda item: (item[0], item[1]))
 
     async def _refresh_persona_daily_plan(self, persona: PersonaContext) -> DailyPlan:
-        plan = await self._ensure_plan(persona, self._now().date(), force=True)
+        plan = await self._ensure_plan(
+            persona,
+            self._now().date(),
+            force=True,
+            preserve_disabled=True,
+        )
         for umo in self.policy.enabled_sessions():
             resolved = await self.personas.resolve(umo)
             if resolved.id == persona.id:
@@ -1222,7 +1270,7 @@ class ProactiveVirtualDailyPlugin(Star):
             logger.exception("[虚拟人生] 回复延迟跳过：人格解析失败")
             return
         plan = self.storage.get_plan(received_at.date().isoformat(), persona.id)
-        if not plan or plan.status != "ok":
+        if not plan or not plan.has_schedule:
             logger.info(
                 "[虚拟人生] 回复延迟跳过：内存中没有有效日程 persona=%s date=%s",
                 persona.id,
@@ -1357,7 +1405,7 @@ class ProactiveVirtualDailyPlugin(Star):
         )
         current_item = (
             timeline_item_at(current_plan, settled_at)
-            if current_plan and current_plan.status == "ok"
+            if current_plan and current_plan.has_schedule
             else None
         )
         delay_context = format_delay_context(batch, settled_at, current_item)
@@ -1495,11 +1543,9 @@ class ProactiveVirtualDailyPlugin(Star):
     async def get_virtual_daily_schedule(self, event: AstrMessageEvent) -> str:
         """查询机器人当前人格的完整虚拟日程、穿搭与当前活动。"""
         _, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
-        return (
-            "今日暂无可用日程。"
-            if plan.status != "ok"
-            else format_plan(plan, self._now())
-        )
+        if plan.status != "ok":
+            return "今日没有日程和穿搭。"
+        return format_plan(plan, self._now())
 
     @filter.llm_tool(name="get_long_term_timeline")
     async def get_long_term_timeline(self, event: AstrMessageEvent) -> str:
@@ -1632,8 +1678,8 @@ class ProactiveVirtualDailyPlugin(Star):
     async def show_schedule(self, event: AstrMessageEvent):
         """查看今日虚拟日程时间轴图片。"""
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
-        if plan.status != "ok":
-            yield event.plain_result("今日暂无可用日程。")
+        if not plan.has_schedule:
+            yield event.plain_result("今日没有日程。")
             return
         now = self._now()
         target = date.fromisoformat(plan.date)
@@ -1656,8 +1702,8 @@ class ProactiveVirtualDailyPlugin(Star):
     async def show_outfit(self, event: AstrMessageEvent):
         """查看今日穿搭图片。"""
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
-        if plan.status != "ok":
-            yield event.plain_result("今日暂无可用穿搭。")
+        if not plan.has_outfit:
+            yield event.plain_result("今日没有穿搭。")
             return
         now = self._now()
         results = await self._image_view_results(
@@ -1673,8 +1719,15 @@ class ProactiveVirtualDailyPlugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def rewrite_schedule(self, event: AstrMessageEvent, extra: str | None = None):
         """重新生成今日完整虚拟日程。"""
+        include_schedule, include_outfit = self._daily_generation_flags()
+        if not include_schedule and not include_outfit:
+            yield event.plain_result("日程生成和穿搭生成均已关闭。")
+            return
         persona, plan = await self._ensure_plan_for_umo(
-            event.unified_msg_origin, force=True, extra=extra or ""
+            event.unified_msg_origin,
+            force=True,
+            extra=extra or "",
+            preserve_disabled=True,
         )
         await self._reschedule_plan_sessions(persona, plan)
         yield event.plain_result(
@@ -1689,6 +1742,10 @@ class ProactiveVirtualDailyPlugin(Star):
         self, event: AstrMessageEvent, extra: str | None = None
     ):
         """保留主题、心情与穿搭，只重写今日时间日程。"""
+        include_schedule, _ = self._daily_generation_flags()
+        if not include_schedule:
+            yield event.plain_result("日程生成功能已关闭。")
+            return
         persona, current = await self._ensure_plan_for_umo(event.unified_msg_origin)
         if current.status != "ok":
             yield event.plain_result(
@@ -1740,6 +1797,10 @@ class ProactiveVirtualDailyPlugin(Star):
         self, event: AstrMessageEvent, extra: str | None = None
     ):
         """保留主题、心情与时间日程，只重写今日穿搭。"""
+        _, include_outfit = self._daily_generation_flags()
+        if not include_outfit:
+            yield event.plain_result("穿搭生成功能已关闭。")
+            return
         persona, current = await self._ensure_plan_for_umo(event.unified_msg_origin)
         if current.status != "ok":
             yield event.plain_result(
@@ -1868,12 +1929,24 @@ class ProactiveVirtualDailyPlugin(Star):
                 persona.id, event.unified_msg_origin
             )
             self.image_renderer.invalidate_persona(persona.id)
-            await self._refresh_persona_daily_plan(persona)
+            plan = await self._refresh_persona_daily_plan(persona)
         except Exception as exc:
             yield event.plain_result(f"批准失败：{exc}")
             return
+        components = []
+        if plan.has_schedule:
+            components.append("日程")
+        if plan.has_outfit:
+            components.append("穿搭")
+        generation_result = (
+            "，已按开关重生成今日" + "和".join(components)
+            if components
+            else "；日程和穿搭生成均已关闭，未生成今日内容"
+        )
         yield event.plain_result(
-            "大时间表已生效并重生成今日日程："
+            "大时间表已生效"
+            + generation_result
+            + "："
             + "、".join(stage["name"] for stage in approved)
         )
 
@@ -2010,6 +2083,9 @@ class ProactiveVirtualDailyPlugin(Star):
     @proactive_group.command("状态")
     async def proactive_status(self, event: AstrMessageEvent):
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
+        if not plan.has_schedule:
+            yield event.plain_result("今日没有日程，主动消息未安排。")
+            return
         state = self.policy.ensure_state(
             event.unified_msg_origin, persona.id, plan, self._now()
         )
@@ -2022,10 +2098,22 @@ class ProactiveVirtualDailyPlugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def trigger_now(self, event: AstrMessageEvent):
         persona, plan = await self._ensure_plan_for_umo(event.unified_msg_origin)
-        await self._deliver(
-            event.unified_msg_origin, persona, plan, "管理员要求立即测试主动消息", 0
+        if not plan.has_schedule:
+            yield event.plain_result("今日没有日程，无法发送测试主动消息。")
+            return
+        sent = await self._deliver(
+            event.unified_msg_origin,
+            persona,
+            plan,
+            "管理员要求立即测试主动消息",
+            0,
+            self._conversation_generation(event.unified_msg_origin),
         )
-        yield event.plain_result("测试主动消息已发送。")
+        yield event.plain_result(
+            "测试主动消息已发送。"
+            if sent
+            else "会话状态已变化，测试主动消息未发送。"
+        )
 
     @proactive_group.command("执行时间")
     async def proactive_execution_times(self, event: AstrMessageEvent):

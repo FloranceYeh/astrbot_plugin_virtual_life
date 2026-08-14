@@ -149,6 +149,7 @@ class ImageRendererTests(unittest.IsolatedAsyncioTestCase):
             await renderer.render_outfit(daily_plan(), datetime(2026, 7, 14, 9, 30))
             data = backend.calls[0][1]
             self.assertEqual(data["outfit_style"], "日常休闲风")
+            self.assertTrue(data["has_schedule"])
             self.assertEqual(data["theme_text"], "学习日")
             self.assertEqual(data["mood"], "专注")
             self.assertEqual(data["outfit_items"][1]["label"], "内衣与打底")

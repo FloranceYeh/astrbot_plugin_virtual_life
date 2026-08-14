@@ -62,6 +62,28 @@ class ProactiveConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         plugin.policy.evaluate.assert_not_called()
         plugin._deliver.assert_not_awaited()
 
+    async def test_missing_schedule_blocks_proactive_generation(self):
+        plugin = plugin_instance(self.now)
+        plugin.policy = SimpleNamespace(ensure_state=Mock(), evaluate=Mock())
+        plugin._deliver = AsyncMock()
+        empty_plan = self.plan.__class__(
+            date=self.plan.date,
+            persona_id=self.plan.persona_id,
+            theme="",
+            mood="",
+            outfit=self.plan.outfit,
+            timeline=(),
+        )
+
+        sent, reason = await plugin._attempt_unsolicited(
+            self.umo, self.persona, empty_plan, "intent", "idle"
+        )
+
+        self.assertFalse(sent)
+        self.assertEqual(reason, "schedule unavailable")
+        plugin.policy.evaluate.assert_not_called()
+        plugin._deliver.assert_not_awaited()
+
     async def test_activity_during_generation_discards_proactive_message(self):
         plugin = plugin_instance(self.now)
         plugin._record_completed_personal_network_events = AsyncMock()

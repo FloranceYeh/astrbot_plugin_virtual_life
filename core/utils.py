@@ -141,17 +141,25 @@ def next_available_at(plan: DailyPlan, moment: datetime) -> datetime | None:
 
 
 def format_plan(plan: DailyPlan, moment: datetime | None = None) -> str:
+    if not plan.has_schedule and not plan.has_outfit:
+        return f"📅 {plan.date}\n今日没有日程和穿搭。"
+    if not plan.has_schedule:
+        return format_outfit(plan)
     current = timeline_item_at(plan, moment) if moment else None
-    outfit_items = "；".join(
-        f"{OUTFIT_CATEGORY_LABELS[item.category]}：{item.name}"
-        for item in plan.outfit.items
-    )
+    outfit = plan.outfit
     lines = [
         f"📅 {plan.date} · {plan.theme}",
         f"💭 心情：{plan.mood}",
-        f"👗 穿搭：{plan.outfit.summary}"
-        + (f"（{outfit_items}）" if outfit_items else ""),
     ]
+    if outfit:
+        outfit_items = "；".join(
+            f"{OUTFIT_CATEGORY_LABELS[item.category]}：{item.name}"
+            for item in outfit.items
+        )
+        lines.append(
+            f"👗 穿搭：{outfit.summary}"
+            + (f"（{outfit_items}）" if outfit_items else "")
+        )
     if current:
         lines.append(
             f"📍 当前：{current.activity}"
@@ -209,17 +217,23 @@ def format_timeline(
 
 
 def format_outfit(plan: DailyPlan) -> str:
+    outfit = plan.outfit
+    if outfit is None:
+        return f"📅 {plan.date}\n今日没有穿搭。"
     outfit_items = "；".join(
         f"{OUTFIT_CATEGORY_LABELS[item.category]}：{item.name}"
-        for item in plan.outfit.items
+        for item in outfit.items
     )
     lines = [
         f"👗 {plan.date} 今日穿搭",
-        f"🎨 穿搭风格：{plan.outfit.style}",
-        f"💡 今日主题：{plan.theme}",
-        f"💭 今日心情：{plan.mood}",
-        f"✨ 造型概述：{plan.outfit.summary}",
+        f"🎨 穿搭风格：{outfit.style}",
+        f"✨ 造型概述：{outfit.summary}",
     ]
+    if plan.has_schedule:
+        lines[2:2] = [
+            f"💡 今日主题：{plan.theme}",
+            f"💭 今日心情：{plan.mood}",
+        ]
     if outfit_items:
         lines.append(f"🧥 穿搭明细：{outfit_items}")
     return "\n".join(lines)

@@ -205,7 +205,7 @@ class DailyPlan:
     persona_id: str
     theme: str
     mood: str
-    outfit: Outfit
+    outfit: Outfit | None
     timeline: tuple[TimelineItem, ...]
     proactive_windows: tuple[ProactiveWindow, ...] = ()
     private_bonus: int = 0
@@ -217,7 +217,7 @@ class DailyPlan:
         date.fromisoformat(self.date)
         if not self.persona_id:
             raise ValueError("persona_id is required")
-        if self.status == "ok":
+        if self.status == "ok" and self.outfit is not None:
             self.outfit.validate_complete()
         previous_end = 0
         ids: set[str] = set()
@@ -260,6 +260,16 @@ class DailyPlan:
                     raise ValueError(
                         "window time must be inside its source timeline item"
                     )
+        elif self.proactive_windows:
+            raise ValueError("proactive windows require a schedule")
+
+    @property
+    def has_schedule(self) -> bool:
+        return self.status == "ok" and bool(self.timeline)
+
+    @property
+    def has_outfit(self) -> bool:
+        return self.status == "ok" and self.outfit is not None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> DailyPlan:
@@ -269,7 +279,11 @@ class DailyPlan:
             persona_id=str(value["persona_id"]),
             theme=str(value.get("theme", "日常")),
             mood=str(value.get("mood", "平静")),
-            outfit=Outfit.from_dict(value.get("outfit")),
+            outfit=(
+                Outfit.from_dict(value.get("outfit"))
+                if value.get("outfit") is not None
+                else None
+            ),
             timeline=tuple(
                 TimelineItem.from_dict(item) for item in value.get("timeline", [])
             ),

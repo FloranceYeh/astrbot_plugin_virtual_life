@@ -1,10 +1,12 @@
 import unittest
+from dataclasses import replace
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from core.models import DailyPlan
 from core.utils import (
     format_outfit,
+    format_plan,
     format_timeline,
     next_available_at,
     parse_schedule_date_range,
@@ -102,6 +104,28 @@ class UtilsTests(unittest.TestCase):
             {"stage": None, "active_periods": [], "holidays": []},
         )
         self.assertIn("当前大时间段：暂无当前阶段", timeline)
+
+    def test_schedule_only_format_omits_outfit(self):
+        content = format_plan(replace(self.plan, outfit=None))
+
+        self.assertIn("日程：", content)
+        self.assertNotIn("穿搭：", content)
+        self.assertNotIn("当前大时间段", content)
+
+    def test_outfit_only_format_omits_schedule_identity(self):
+        content = format_plan(
+            replace(
+                self.plan,
+                theme="",
+                mood="",
+                timeline=(),
+                proactive_windows=(),
+            )
+        )
+
+        self.assertIn("穿搭风格：", content)
+        self.assertNotIn("今日主题", content)
+        self.assertNotIn("今日日程", content)
 
     def test_schedule_requirement_date_defaults(self):
         reference = date(2026, 7, 27)
