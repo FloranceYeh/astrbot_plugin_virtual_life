@@ -10,8 +10,6 @@
 
 > 推荐可联动插件 [Personal Network](https://cloud.astrbot.app/plugin/FloranceYeh/astrbot_plugin_personal_network)
 
-> 欢迎加入群聊（1094990582）一起讨论插件使用、功能建议和问题反馈。也欢迎各方大佬交流学习LLM、Prompt、AstrBot开发。
-
 ## 功能
 
 - **人格共享生活状态**：按 `persona_id` 管理数据，同一人格在不同私聊和群聊中共享连续一致的生活进度。
