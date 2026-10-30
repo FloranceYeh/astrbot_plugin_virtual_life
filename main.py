@@ -65,7 +65,10 @@ class ProactiveVirtualDailyPlugin(Star):
         self.config = config
         self.data_dir = StarTools.get_data_dir("astrbot_plugin_virtual_life")
         self.storage = PluginStorage(self.data_dir)
-        self.personas = PersonaResolver(context)
+        self.personas = PersonaResolver(
+            context,
+            settings_provider=lambda: self.config.get("schedule_settings", {}) or {},
+        )
         self.plan_generator = DailyPlanGenerator(context, config)
         self.message_generator = ProactiveMessageGenerator(context, config)
         delivery_settings = self.config.get("delivery_settings", {}) or {}

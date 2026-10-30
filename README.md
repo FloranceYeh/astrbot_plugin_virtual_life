@@ -85,6 +85,7 @@ python scripts/render_image_preview.py --view all --output-dir preview_output
 - `schedule_settings.reference_history_days`（历史参考天数）：生成日程时参考的近期自然日天数，默认 `3`，设置为 `0` 可关闭
 - `schedule_settings.history_days`（历史保留天数）：本地保留的日程历史天数，默认 `3`
 - `schedule_settings.generation_retries`（生成重试次数）：生成结果校验失败后的额外重试次数，默认 `2`；每次重试只参考最近一次失败输出
+- `schedule_settings.override_persona`（日程专用人格）：默认留空，按各会话人格分别生成；填入 AstrBot 里已建好的人格 ID 后，生成日程、穿搭和大时间表改用该人格，所有会话共用同一份日程。填错时打 warning 并回退会话人格
 - `prompt_settings`（提示词与模板）：集中管理所有生成提示词与模板，配置界面默认折叠
 - `prompt_settings.generation_retry_prompt_template`（生成重试纠错模板）：生成纠错提示模板，可使用 `{mode}`、`{attempt}`、`{error}`、`{previous_output}`；上次输出最多注入 `12000` 个字符
 - `smart_context_injection.enable`（启用智能注入）：普通聊天智能状态注入总开关，默认启用；不额外调用 LLM
